@@ -172,7 +172,7 @@ public class GameService {
         Player player = current;
         if (card == null) throw new RuntimeException("Card is required");
 
-        Cell target = game.getBoard()[x][y];
+        Cell target = game.getBoard()[y][x];
         if (target.isCorner()) {
             throw new RuntimeException("Corner cell is not playable");
         }
@@ -187,7 +187,7 @@ public class GameService {
         } else if (oneEyed) {
             if (target.getOwner() == null) throw new RuntimeException("No chip to remove");
             if (isSameTeam(game, player, target.getOwner())) throw new RuntimeException("Cannot remove your own chip");
-            if (isLockedChip(game, target.getOwner(), x, y)) {
+            if (isLockedChip(game, target.getOwner(), y, x)) {
                 throw new RuntimeException("Cannot remove chip from sequence");
             }
             target.setOwner(null);
