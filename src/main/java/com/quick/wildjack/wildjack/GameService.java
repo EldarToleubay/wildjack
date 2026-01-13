@@ -71,6 +71,7 @@ public class GameService {
 
         // колода (остаток)
         List<Card> deck = new ArrayList<>(generateDeck());
+        shuffleDeck(deck);
         game.setDeck(deck);
 
         // ход начнётся только при STARTED
@@ -130,6 +131,7 @@ public class GameService {
         game.setCurrentPlayerIndex(0);
 
         // раздать карты всем
+        shuffleDeck(game.getDeck());
         int handSize = getHandSize(game.getPlayers().size());
         for (Player pl : game.getPlayers()) {
             drawCards(pl, game.getDeck(), handSize);
@@ -661,6 +663,16 @@ public class GameService {
                 || (x == 0 && y == 9)
                 || (x == 9 && y == 0)
                 || (x == 9 && y == 9);
+    }
+
+    private void shuffleDeck(List<Card> deck) {
+        Random random = new Random();
+        for (int i = deck.size() - 1; i > 0; i--) {
+            int j = random.nextInt(i + 1);
+            Card temp = deck.get(i);
+            deck.set(i, deck.get(j));
+            deck.set(j, temp);
+        }
     }
 
     private record Sequence(List<Position> positions) {
