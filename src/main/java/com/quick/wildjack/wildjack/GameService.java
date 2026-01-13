@@ -22,8 +22,8 @@ public class GameService {
         if (playerNames == null || playerNames.isEmpty()) {
             throw new RuntimeException("At least 1 player required");
         }
-        if (playerNames.size() != 2 && playerNames.size() != 4 && playerNames.size() != 6) {
-            throw new RuntimeException("Players must be 2, 4, or 6");
+        if (playerNames.size() < 1 || playerNames.size() > 6) {
+            throw new RuntimeException("Players must be between 1 and 6");
         }
 
         Game game = new Game();
@@ -630,12 +630,13 @@ public class GameService {
     }
 
     private static int getHandSize(int playersCount) {
-        return switch (playersCount) {
-            case 2 -> 7;
-            case 4 -> 6;
-            case 6 -> 5;
-            default -> throw new IllegalArgumentException("Players must be 2, 4, or 6");
-        };
+        if (playersCount <= 2) {
+            return 7;
+        }
+        if (playersCount <= 4) {
+            return 6;
+        }
+        return 5;
     }
 
     private static boolean isCornerCell(int x, int y) {
