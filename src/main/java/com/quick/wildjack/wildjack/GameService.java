@@ -16,6 +16,7 @@ public class GameService {
     private static final int BOARD_SIZE = 10;
     private static final int HAND_SIZE = 7;
     private static final long TURN_MS = 60_000;
+    private static final int SEQUENCES_TO_WIN = 2;
 
     public Game createGame(List<String> playerNames) {
         if (playerNames == null || playerNames.isEmpty()) {
@@ -30,6 +31,9 @@ public class GameService {
         game.setStatus(GameStatus.WAITING);
         game.setMaxPlayers(Math.max(2, Math.min(4, playerNames.size()))); // либо 2..4
         game.setTeamGame(false);
+        game.setResult(null);
+        game.setWinnerKey(null);
+        game.setSequencesByKey(new HashMap<>());
 
         // игроки (пока без карт — раздадим при startGame)
         String[] colors = {"RED", "BLUE", "GREEN", "YELLOW"};
@@ -128,6 +132,7 @@ public class GameService {
 
         // установить дедлайн
         game.setTurnDeadlineEpochMs(System.currentTimeMillis() + TURN_MS);
+        game.getSequencesByKey().clear();
     }
 
 
@@ -155,6 +160,7 @@ public class GameService {
         }
 
         Player player = current;
+        if (card == null) throw new RuntimeException("Card is required");
 
         Cell target = game.getBoard()[x][y];
         if (target.isCorner()) {
@@ -170,7 +176,7 @@ public class GameService {
 
         } else if (oneEyed) {
             if (target.getOwner() == null) throw new RuntimeException("No chip to remove");
-            if (target.getOwner().getId().equals(playerId)) throw new RuntimeException("Cannot remove your own chip");
+            if (isSameTeam(game, player, target.getOwner())) throw new RuntimeException("Cannot remove your own chip");
             target.setOwner(null);
 
         } else {
@@ -189,18 +195,51 @@ public class GameService {
         // добрать
         drawCards(player, game.getDeck(), 1);
 
-        // победа можно оставить как у тебя
+        // победа: нужно 2 sequences
+        if (checkAndUpdateVictory(game, player)) {
+            return game;
+        }
+
+        // проверка ничьей
+        if (checkAndUpdateDraw(game)) {
+            return game;
+        }
 
         // следующий игрок + дедлайн
-        game.setCurrentPlayerIndex((game.getCurrentPlayerIndex() + 1) % game.getPlayers().size());
-        game.setTurnDeadlineEpochMs(System.currentTimeMillis() + TURN_MS);
+        advanceTurn(game);
 
         return game;
     }
 
+    public Game exchangeDeadCard(String gameId, String playerId, Card card) {
+        Game game = games.get(gameId);
+        if (game == null) throw new RuntimeException("Game not found");
+        if (game.getStatus() != GameStatus.STARTED) throw new RuntimeException("Game not started yet");
+
+        Player current = game.getPlayers().get(game.getCurrentPlayerIndex());
+        if (!current.getId().equals(playerId)) {
+            throw new RuntimeException("Not your turn");
+        }
+        if (card == null) throw new RuntimeException("Card is required");
+
+        boolean inHand = current.getHand().stream().anyMatch(c -> sameCard(c, card));
+        if (!inHand) throw new RuntimeException("Card not in hand");
+        if (!isCardDead(game, current, card)) throw new RuntimeException("Card is not dead");
+
+        current.getHand().removeIf(c -> sameCard(c, card));
+
+        drawCards(current, game.getDeck(), 1);
+
+        if (checkAndUpdateDraw(game)) {
+            return game;
+        }
+
+        advanceTurn(game);
+        return game;
+    }
+
     private void skipTurn(Game game) {
-        game.setCurrentPlayerIndex((game.getCurrentPlayerIndex() + 1) % game.getPlayers().size());
-        game.setTurnDeadlineEpochMs(System.currentTimeMillis() + TURN_MS);
+        advanceTurn(game);
     }
 
     private boolean sameCard(Card a, Card b) {
@@ -215,37 +254,7 @@ public class GameService {
      * Проверка победы игрока
      */
     public boolean checkVictory(Game game, Player player) {
-        Cell[][] b = game.getBoard();
-        int size = b.length;
-
-        // Горизонталь, вертикаль, диагональ
-        for (int i = 0; i < size; i++) {
-            for (int j = 0; j < size; j++) {
-                if (countSequence(b, i, j, 0, 1, player) >= 5) return true; // горизонталь
-                if (countSequence(b, i, j, 1, 0, player) >= 5) return true; // вертикаль
-                if (countSequence(b, i, j, 1, 1, player) >= 5) return true; // диагональ \
-                if (countSequence(b, i, j, 1, -1, player) >= 5) return true; // диагональ /
-            }
-        }
-        return false;
-    }
-
-    /**
-     * Считаем последовательность фишек
-     */
-    private int countSequence(Cell[][] b, int x, int y, int dx, int dy, Player player) {
-        int count = 0;
-        int size = b.length;
-        for (int step = 0; step < 5; step++) {
-            int nx = x + dx * step;
-            int ny = y + dy * step;
-            if (nx < 0 || ny < 0 || nx >= size || ny >= size) break;
-            Cell c = b[nx][ny];
-            if (c.isCorner() || (c.getOwner() != null && c.getOwner().getId().equals(player.getId()))) {
-                count++;
-            } else break;
-        }
-        return count;
+        return findSequences(game, player).size() >= SEQUENCES_TO_WIN;
     }
 
     /**
@@ -281,14 +290,191 @@ public class GameService {
      * Проверка Two-Eyed Jack (J бубны или черви)
      */
     private boolean isTwoEyedJack(Card card) {
-        return card.getRank().equals("J") && (card.getSuit().equals("Hearts") || card.getSuit().equals("Diamonds"));
+        return card != null
+                && "J".equals(card.getRank())
+                && ("Hearts".equals(card.getSuit()) || "Diamonds".equals(card.getSuit()));
     }
 
     /**
      * Проверка One-Eyed Jack (J трефы или пики)
      */
     private boolean isOneEyedJack(Card card) {
-        return card.getRank().equals("J") && (card.getSuit().equals("Clubs") || card.getSuit().equals("Spades"));
+        return card != null
+                && "J".equals(card.getRank())
+                && ("Clubs".equals(card.getSuit()) || "Spades".equals(card.getSuit()));
     }
 
+    private void advanceTurn(Game game) {
+        game.setCurrentPlayerIndex((game.getCurrentPlayerIndex() + 1) % game.getPlayers().size());
+        game.setTurnDeadlineEpochMs(System.currentTimeMillis() + TURN_MS);
+    }
+
+    private boolean checkAndUpdateVictory(Game game, Player player) {
+        Map<String, Integer> sequencesByKey = updateSequencesSnapshot(game);
+        String key = getSequenceKey(game, player);
+        int count = sequencesByKey.getOrDefault(key, 0);
+        if (count >= SEQUENCES_TO_WIN) {
+            game.setStatus(GameStatus.FINISHED);
+            game.setResult(GameResult.WIN);
+            game.setWinnerKey(key);
+            return true;
+        }
+        return false;
+    }
+
+    private Map<String, Integer> updateSequencesSnapshot(Game game) {
+        Map<String, Integer> sequencesByKey = new HashMap<>();
+        for (Player player : game.getPlayers()) {
+            String key = getSequenceKey(game, player);
+            if (sequencesByKey.containsKey(key)) {
+                continue;
+            }
+            sequencesByKey.put(key, findSequences(game, player).size());
+        }
+        game.setSequencesByKey(sequencesByKey);
+        return sequencesByKey;
+    }
+
+    private boolean checkAndUpdateDraw(Game game) {
+        if (!game.getDeck().isEmpty()) {
+            return false;
+        }
+
+        boolean allDead = game.getPlayers().stream()
+                .allMatch(player -> player.getHand().stream().allMatch(card -> isCardDead(game, player, card)));
+
+        if (allDead) {
+            game.setStatus(GameStatus.FINISHED);
+            game.setResult(GameResult.DRAW);
+            game.setWinnerKey(null);
+            return true;
+        }
+        return false;
+    }
+
+    private boolean isCardDead(Game game, Player player, Card card) {
+        if (card == null) {
+            return true;
+        }
+
+        if (isTwoEyedJack(card)) {
+            return !hasFreeCell(game);
+        }
+
+        if (isOneEyedJack(card)) {
+            return !hasOpponentChip(game, player);
+        }
+
+        return !hasFreeMatchingCell(game, card);
+    }
+
+    private boolean hasFreeCell(Game game) {
+        for (Cell[] row : game.getBoard()) {
+            for (Cell cell : row) {
+                if (!cell.isCorner() && cell.getOwner() == null) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private boolean hasOpponentChip(Game game, Player player) {
+        for (Cell[] row : game.getBoard()) {
+            for (Cell cell : row) {
+                if (!cell.isCorner() && cell.getOwner() != null && !isSameTeam(game, player, cell.getOwner())) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private boolean hasFreeMatchingCell(Game game, Card card) {
+        for (Cell[] row : game.getBoard()) {
+            for (Cell cell : row) {
+                if (cell.isCorner()) {
+                    continue;
+                }
+                if (sameCard(cell.getCard(), card) && cell.getOwner() == null) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private Set<SequenceKey> findSequences(Game game, Player player) {
+        Set<SequenceKey> sequences = new HashSet<>();
+        Cell[][] board = game.getBoard();
+        int size = board.length;
+        int[][] directions = new int[][]{
+                {0, 1}, {1, 0}, {1, 1}, {1, -1}
+        };
+
+        for (int x = 0; x < size; x++) {
+            for (int y = 0; y < size; y++) {
+                for (int[] dir : directions) {
+                    int dx = dir[0];
+                    int dy = dir[1];
+                    if (!ownsCellForTeam(board[x][y], game, player)) {
+                        continue;
+                    }
+                    int px = x - dx;
+                    int py = y - dy;
+                    if (px >= 0 && py >= 0 && px < size && py < size && ownsCellForTeam(board[px][py], game, player)) {
+                        continue;
+                    }
+
+                    int length = 0;
+                    int nx = x;
+                    int ny = y;
+                    while (nx >= 0 && ny >= 0 && nx < size && ny < size && ownsCellForTeam(board[nx][ny], game, player)) {
+                        length++;
+                        nx += dx;
+                        ny += dy;
+                    }
+                    if (length >= 5) {
+                        sequences.add(new SequenceKey(x, y, dx, dy));
+                    }
+                }
+            }
+        }
+        return sequences;
+    }
+
+    private boolean ownsCellForTeam(Cell cell, Game game, Player player) {
+        if (cell.isCorner()) {
+            return true;
+        }
+        Player owner = cell.getOwner();
+        return owner != null && isSameTeam(game, player, owner);
+    }
+
+    private boolean isSameTeam(Game game, Player a, Player b) {
+        if (!game.isTeamGame()) {
+            return a.getId().equals(b.getId());
+        }
+        return getTeamIndex(game, a) == getTeamIndex(game, b);
+    }
+
+    private int getTeamIndex(Game game, Player player) {
+        for (int i = 0; i < game.getPlayers().size(); i++) {
+            if (game.getPlayers().get(i).getId().equals(player.getId())) {
+                return i % 2;
+            }
+        }
+        return -1;
+    }
+
+    private String getSequenceKey(Game game, Player player) {
+        if (!game.isTeamGame()) {
+            return player.getId();
+        }
+        int teamIndex = getTeamIndex(game, player);
+        return "TEAM_" + teamIndex;
+    }
+
+    private record SequenceKey(int x, int y, int dx, int dy) {
+    }
 }
