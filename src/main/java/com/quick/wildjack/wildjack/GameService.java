@@ -29,7 +29,7 @@ public class GameService {
         Game game = new Game();
         game.setId(UUID.randomUUID().toString());
         game.setStatus(GameStatus.WAITING);
-        game.setMaxPlayers(playerNames.size());
+        game.setMaxPlayers(Math.max(2, playerNames.size()));
         game.setTeamGame(true);
         exchangeUsedByGame.put(game.getId(), false);
 
