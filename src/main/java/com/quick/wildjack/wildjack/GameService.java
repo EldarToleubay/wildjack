@@ -35,12 +35,13 @@ public class GameService {
 
         // игроки (пока без карт — раздадим при startGame)
         String[] colors = {"RED", "BLUE", "GREEN"};
+        int teamCount = getTeamCount(playerNames.size());
         List<Player> players = new ArrayList<>();
         for (int i = 0; i < playerNames.size(); i++) {
             Player p = new Player();
             p.setId(UUID.randomUUID().toString());
             p.setName(playerNames.get(i));
-            int teamIndex = i % getTeamCount(game);
+            int teamIndex = i % teamCount;
             p.setColor(colors[teamIndex % colors.length]);
             p.setHand(new ArrayList<>());
             players.add(p);
@@ -108,7 +109,7 @@ public class GameService {
 
         // цвет по команде
         String[] colors = {"RED", "BLUE", "GREEN"};
-        int teamIndex = game.getPlayers().size() % getTeamCount(game);
+        int teamIndex = game.getPlayers().size() % getTeamCount(game.getPlayers().size());
         p.setColor(colors[teamIndex % colors.length]);
 
         game.getPlayers().add(p);
@@ -518,11 +519,18 @@ public class GameService {
     }
 
     private int getTeamCount(Game game) {
-        return game.getPlayers().size() == 6 ? 3 : 2;
+        List<Player> players = game.getPlayers();
+        return players == null ? 2 : getTeamCount(players.size());
+    }
+
+    private int getTeamCount(int playerCount) {
+        return playerCount == 6 ? 3 : 2;
     }
 
     private int getSequencesToWin(Game game) {
-        return game.getPlayers().size() == 2 ? 1 : 2;
+        List<Player> players = game.getPlayers();
+        int count = players == null ? 0 : players.size();
+        return count <= 2 ? 1 : 2;
     }
 
     private boolean isExchangeUsedThisTurn(Game game) {
