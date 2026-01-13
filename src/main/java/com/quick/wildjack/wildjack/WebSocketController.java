@@ -31,6 +31,11 @@ public class WebSocketController {
                         message.getPlayerId(),
                         message.getCard()
                 );
+            } else if ("SKIP".equalsIgnoreCase(action)) {
+                game = gameService.skipTurnIfStuck(
+                        message.getGameId(),
+                        message.getPlayerId()
+                );
             } else if ("MOVE".equalsIgnoreCase(action)) {
                 game = gameService.makeMove(
                         message.getGameId(),
