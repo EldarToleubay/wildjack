@@ -31,6 +31,9 @@ public class GameService {
         game.setStatus(GameStatus.WAITING);
         game.setMaxPlayers(Math.max(2, playerNames.size()));
         game.setTeamGame(true);
+        game.setResult(null);
+        game.setWinnerKey(null);
+        game.setSequencesByKey(new HashMap<>());
         exchangeUsedByGame.put(game.getId(), false);
 
         // игроки (пока без карт — раздадим при startGame)
@@ -135,6 +138,7 @@ public class GameService {
         // установить дедлайн
         game.setTurnDeadlineEpochMs(System.currentTimeMillis() + TURN_MS);
         exchangeUsedByGame.put(game.getId(), false);
+        game.getSequencesByKey().clear();
     }
 
 
@@ -349,6 +353,8 @@ public class GameService {
         int count = sequencesByKey.getOrDefault(key, 0);
         if (count >= getSequencesToWin(game)) {
             game.setStatus(GameStatus.FINISHED);
+            game.setResult(GameResult.WIN);
+            game.setWinnerKey(key);
             return true;
         }
         return false;
@@ -363,12 +369,15 @@ public class GameService {
             }
             sequencesByKey.put(key, findSequences(game, player).size());
         }
+        game.setSequencesByKey(sequencesByKey);
         return sequencesByKey;
     }
 
     private boolean checkAndUpdateDraw(Game game) {
         if (game.getDeck().isEmpty() && game.getStatus() == GameStatus.STARTED) {
             game.setStatus(GameStatus.FINISHED);
+            game.setResult(GameResult.DRAW);
+            game.setWinnerKey(null);
             return true;
         }
         return false;
