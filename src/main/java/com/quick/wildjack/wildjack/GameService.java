@@ -141,6 +141,21 @@ public class GameService {
         return game;
     }
 
+    public JoinGameResponse rejoinGame(String gameId, String sessionToken) {
+        Game game = getGame(gameId);
+        if (game == null) throw new RuntimeException("Game not found");
+        if (sessionToken == null || sessionToken.isBlank()) {
+            throw new RuntimeException("Session token is required");
+        }
+
+        Player player = game.getPlayers().stream()
+                .filter(p -> sessionToken.equals(p.getId()))
+                .findFirst()
+                .orElseThrow(() -> new RuntimeException("Session not found"));
+
+        return new JoinGameResponse(game, player.getId());
+    }
+
     private void startGame(Game game) {
         game.setStatus(GameStatus.STARTED);
         game.setCurrentPlayerIndex(0);
