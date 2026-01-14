@@ -1,5 +1,8 @@
 package com.quick.wildjack.wildjack;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 
 import java.util.*;
@@ -9,6 +12,17 @@ public class GameService {
 
     private final Map<String, Game> games = new HashMap<>();
     private final Map<String, Boolean> exchangeUsedByGame = new HashMap<>();
+    private final RedisTemplate<String, Game> gameRedisTemplate;
+    private final FinishedGameRepository finishedGameRepository;
+    private final ObjectMapper objectMapper;
+
+    public GameService(RedisTemplate<String, Game> gameRedisTemplate,
+                       FinishedGameRepository finishedGameRepository,
+                       ObjectMapper objectMapper) {
+        this.gameRedisTemplate = gameRedisTemplate;
+        this.finishedGameRepository = finishedGameRepository;
+        this.objectMapper = objectMapper;
+    }
 
     /**
      * Создание новой игры
@@ -79,7 +93,7 @@ public class GameService {
         game.setTurnDeadlineEpochMs(0);
         exchangeUsedByGame.put(game.getId(), false);
 
-        games.put(game.getId(), game);
+        saveActiveGame(game);
 
         // если игроков уже 2+ и ты хочешь стартовать сразу:
         if (game.getPlayers().size() >= 2 && game.getPlayers().size() == game.getMaxPlayers()) {
@@ -91,7 +105,7 @@ public class GameService {
 
 
     public Game joinGame(String gameId, String playerName) {
-        Game game = games.get(gameId);
+        Game game = getGame(gameId);
         if (game == null) throw new RuntimeException("Game not found");
 
         if (game.getStatus() != GameStatus.WAITING) {
@@ -123,6 +137,7 @@ public class GameService {
             startGame(game);
         }
 
+        saveActiveGame(game);
         return game;
     }
 
@@ -141,6 +156,7 @@ public class GameService {
         game.setTurnDeadlineEpochMs(System.currentTimeMillis() + TURN_MS);
         exchangeUsedByGame.put(game.getId(), false);
         game.getSequencesByKey().clear();
+        saveActiveGame(game);
     }
 
 
@@ -149,7 +165,7 @@ public class GameService {
      * Игрок делает ход
      */
     public Game makeMove(String gameId, String playerId, Card card, int x, int y) {
-        Game game = games.get(gameId);
+        Game game = getGame(gameId);
         if (game == null) throw new RuntimeException("Game not found");
         if (game.getStatus() != GameStatus.STARTED) throw new RuntimeException("Game not started yet");
 
@@ -212,22 +228,25 @@ public class GameService {
 
         // победа: sequencesToWin
         if (checkAndUpdateVictory(game, player)) {
+            finalizeGame(game);
             return game;
         }
 
         // проверка ничьей
         if (checkAndUpdateDraw(game)) {
+            finalizeGame(game);
             return game;
         }
 
         // следующий игрок + дедлайн
         advanceTurn(game);
+        saveActiveGame(game);
 
         return game;
     }
 
     public Game exchangeDeadCard(String gameId, String playerId, Card card) {
-        Game game = games.get(gameId);
+        Game game = getGame(gameId);
         if (game == null) throw new RuntimeException("Game not found");
         if (game.getStatus() != GameStatus.STARTED) throw new RuntimeException("Game not started yet");
 
@@ -253,14 +272,16 @@ public class GameService {
         setExchangeUsedThisTurn(game, true);
 
         if (checkAndUpdateDraw(game)) {
+            finalizeGame(game);
             return game;
         }
 
+        saveActiveGame(game);
         return game;
     }
 
     public Game skipTurnIfStuck(String gameId, String playerId) {
-        Game game = games.get(gameId);
+        Game game = getGame(gameId);
         if (game == null) throw new RuntimeException("Game not found");
         if (game.getStatus() != GameStatus.STARTED) throw new RuntimeException("Game not started yet");
 
@@ -274,11 +295,13 @@ public class GameService {
         }
 
         advanceTurn(game);
+        saveActiveGame(game);
         return game;
     }
 
     private void skipTurn(Game game) {
         advanceTurn(game);
+        saveActiveGame(game);
     }
 
     private boolean sameCard(Card a, Card b) {
@@ -347,6 +370,56 @@ public class GameService {
         game.setCurrentPlayerIndex((game.getCurrentPlayerIndex() + 1) % game.getPlayers().size());
         game.setTurnDeadlineEpochMs(System.currentTimeMillis() + TURN_MS);
         setExchangeUsedThisTurn(game, false);
+    }
+
+    private Game getGame(String gameId) {
+        Game game = games.get(gameId);
+        if (game != null) {
+            return game;
+        }
+        if (gameRedisTemplate == null) {
+            return null;
+        }
+        game = gameRedisTemplate.opsForValue().get(redisKey(gameId));
+        if (game != null) {
+            games.put(gameId, game);
+        }
+        return game;
+    }
+
+    private void saveActiveGame(Game game) {
+        games.put(game.getId(), game);
+        if (gameRedisTemplate != null) {
+            gameRedisTemplate.opsForValue().set(redisKey(game.getId()), game);
+        }
+    }
+
+    private void finalizeGame(Game game) {
+        saveFinishedGame(game);
+        games.remove(game.getId());
+        exchangeUsedByGame.remove(game.getId());
+        if (gameRedisTemplate != null) {
+            gameRedisTemplate.delete(redisKey(game.getId()));
+        }
+    }
+
+    private void saveFinishedGame(Game game) {
+        if (finishedGameRepository == null) {
+            return;
+        }
+        try {
+            FinishedGame finishedGame = new FinishedGame();
+            finishedGame.setId(game.getId());
+            finishedGame.setPayload(objectMapper.writeValueAsString(game));
+            finishedGame.setFinishedAt(java.time.Instant.now());
+            finishedGameRepository.save(finishedGame);
+        } catch (JsonProcessingException e) {
+            throw new RuntimeException("Failed to serialize finished game", e);
+        }
+    }
+
+    private String redisKey(String gameId) {
+        return "game:" + gameId;
     }
 
     private boolean checkAndUpdateVictory(Game game, Player player) {
