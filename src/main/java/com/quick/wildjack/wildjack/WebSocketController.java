@@ -4,7 +4,6 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.messaging.handler.annotation.MessageMapping;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Controller;
-import org.springframework.web.bind.annotation.CrossOrigin;
 
 @Controller
 @RequiredArgsConstructor
@@ -20,14 +19,34 @@ public class WebSocketController {
     @MessageMapping("/move")
     public void handleMove(MoveMessage message) {
         try {
-            // Выполняем ход
-            Game game = gameService.makeMove(
-                    message.getGameId(),
-                    message.getPlayerId(),
-                    message.getCard(),
-                    message.getX(),
-                    message.getY()
-            );
+            String action = message.getAction();
+            if (action == null || action.isBlank()) {
+                action = "MOVE";
+            }
+
+            Game game;
+            if ("EXCHANGE".equalsIgnoreCase(action)) {
+                game = gameService.exchangeDeadCard(
+                        message.getGameId(),
+                        message.getPlayerId(),
+                        message.getCard()
+                );
+            } else if ("SKIP".equalsIgnoreCase(action)) {
+                game = gameService.skipTurnIfStuck(
+                        message.getGameId(),
+                        message.getPlayerId()
+                );
+            } else if ("MOVE".equalsIgnoreCase(action)) {
+                game = gameService.makeMove(
+                        message.getGameId(),
+                        message.getPlayerId(),
+                        message.getCard(),
+                        message.getX(),
+                        message.getY()
+                );
+            } else {
+                throw new RuntimeException("Unknown action: " + action);
+            }
 
             // Отправляем обновление доски всем игрокам игры
             messagingTemplate.convertAndSend("/topic/game/" + game.getId(), game);
