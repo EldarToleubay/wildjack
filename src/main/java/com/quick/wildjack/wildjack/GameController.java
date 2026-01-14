@@ -44,6 +44,12 @@ public class GameController {
         return ResponseEntity.ok(new JoinGameResponse(game, playerId));
     }
 
+    @PostMapping("/{gameId}/rejoin")
+    public ResponseEntity<JoinGameResponse> rejoinGame(@PathVariable String gameId,
+                                                       @RequestBody RejoinRequest request) {
+        return ResponseEntity.ok(gameService.rejoinGame(gameId, request.getSessionToken()));
+    }
+
 
     @PostMapping("/{gameId}/move")
     public ResponseEntity<Game> makeMove(
