@@ -184,9 +184,8 @@ public class GameService {
         if (game == null) throw new RuntimeException("Game not found");
         if (game.getStatus() != GameStatus.STARTED) throw new RuntimeException("Game not started yet");
 
-        // таймер: если просрочено — скипаем ход
-        if (System.currentTimeMillis() > game.getTurnDeadlineEpochMs()) {
-            skipTurn(game);
+        if (handleTimeoutIfNeeded(game)) {
+            return game;
         }
 
         if (checkAndSkipIfStuck(game)) {
@@ -265,6 +264,10 @@ public class GameService {
         if (game == null) throw new RuntimeException("Game not found");
         if (game.getStatus() != GameStatus.STARTED) throw new RuntimeException("Game not started yet");
 
+        if (handleTimeoutIfNeeded(game)) {
+            return game;
+        }
+
         if (checkAndSkipIfStuck(game)) {
             return game;
         }
@@ -300,6 +303,10 @@ public class GameService {
         if (game == null) throw new RuntimeException("Game not found");
         if (game.getStatus() != GameStatus.STARTED) throw new RuntimeException("Game not started yet");
 
+        if (handleTimeoutIfNeeded(game)) {
+            return game;
+        }
+
         Player current = game.getPlayers().get(game.getCurrentPlayerIndex());
         if (!current.getId().equals(playerId)) {
             throw new RuntimeException("Not your turn");
@@ -317,6 +324,27 @@ public class GameService {
     private void skipTurn(Game game) {
         advanceTurn(game);
         saveActiveGame(game);
+    }
+
+    private boolean handleTimeoutIfNeeded(Game game) {
+        if (game.getStatus() != GameStatus.STARTED) {
+            return false;
+        }
+        if (System.currentTimeMillis() <= game.getTurnDeadlineEpochMs()) {
+            return false;
+        }
+        List<Player> players = game.getPlayers();
+        if (players == null || players.size() < 2) {
+            return false;
+        }
+        int winnerIndex = (game.getCurrentPlayerIndex() + 1) % players.size();
+        Player winner = players.get(winnerIndex);
+        updateSequencesSnapshot(game);
+        game.setStatus(GameStatus.FINISHED);
+        game.setResult(GameResult.WIN);
+        game.setWinnerKey(getSequenceKey(game, winner));
+        finalizeGame(game);
+        return true;
     }
 
     private boolean sameCard(Card a, Card b) {
