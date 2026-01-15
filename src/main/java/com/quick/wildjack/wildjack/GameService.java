@@ -108,6 +108,13 @@ public class GameService {
         Game game = getGame(gameId);
         if (game == null) throw new RuntimeException("Game not found");
 
+        Optional<Player> existingPlayer = game.getPlayers().stream()
+                .filter(p -> p.getName().equalsIgnoreCase(playerName))
+                .findFirst();
+        if (existingPlayer.isPresent()) {
+            return game;
+        }
+
         if (game.getStatus() != GameStatus.WAITING) {
             throw new RuntimeException("Game already started");
         }
@@ -115,10 +122,6 @@ public class GameService {
         if (game.getPlayers().size() >= game.getMaxPlayers()) {
             throw new RuntimeException("Lobby is full");
         }
-
-        boolean exists = game.getPlayers().stream()
-                .anyMatch(p -> p.getName().equalsIgnoreCase(playerName));
-        if (exists) throw new RuntimeException("Player already exists");
 
         Player p = new Player();
         p.setId(UUID.randomUUID().toString());
@@ -324,6 +327,16 @@ public class GameService {
     private void skipTurn(Game game) {
         advanceTurn(game);
         saveActiveGame(game);
+    }
+
+    public List<Game> finishExpiredGames() {
+        List<Game> finished = new ArrayList<>();
+        for (Game game : new ArrayList<>(games.values())) {
+            if (handleTimeoutIfNeeded(game)) {
+                finished.add(game);
+            }
+        }
+        return finished;
     }
 
     private boolean handleTimeoutIfNeeded(Game game) {
