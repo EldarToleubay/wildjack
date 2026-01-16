@@ -672,7 +672,7 @@ public class GameService {
     private int getSequencesToWin(Game game) {
         List<Player> players = game.getPlayers();
         int count = players == null ? 0 : players.size();
-        return count <= 2 ? 1 : 2;
+        return 2;
     }
 
     private boolean isExchangeUsedThisTurn(Game game) {
@@ -780,12 +780,6 @@ public class GameService {
     }
 
     private static int getHandSize(int playersCount) {
-        if (playersCount <= 2) {
-            return 7;
-        }
-        if (playersCount <= 4) {
-            return 6;
-        }
         return 5;
     }
 
