@@ -10,6 +10,8 @@ import java.util.*;
 @Service
 public class GameService {
 
+    private static final String GAME_ID_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+    private static final int GAME_ID_LENGTH = 5;
     private final Map<String, Game> games = new HashMap<>();
     private final Map<String, Boolean> exchangeUsedByGame = new HashMap<>();
     private final RedisTemplate<String, Game> gameRedisTemplate;
@@ -41,7 +43,7 @@ public class GameService {
         }
 
         Game game = new Game();
-        game.setId(UUID.randomUUID().toString());
+        game.setId(generateGameId());
         game.setStatus(GameStatus.WAITING);
         game.setMaxPlayers(Math.max(2, playerNames.size()));
         game.setTeamGame(true);
@@ -802,6 +804,22 @@ public class GameService {
             deck.set(i, deck.get(j));
             deck.set(j, temp);
         }
+    }
+
+    private String generateGameId() {
+        Random random = new Random();
+        for (int attempt = 0; attempt < 1000; attempt++) {
+            StringBuilder builder = new StringBuilder(GAME_ID_LENGTH);
+            for (int i = 0; i < GAME_ID_LENGTH; i++) {
+                int index = random.nextInt(GAME_ID_ALPHABET.length());
+                builder.append(GAME_ID_ALPHABET.charAt(index));
+            }
+            String id = builder.toString();
+            if (!games.containsKey(id)) {
+                return id;
+            }
+        }
+        return UUID.randomUUID().toString();
     }
 
     private record Sequence(List<Position> positions) {
