@@ -173,6 +173,7 @@ public class GameService {
         int handSize = getHandSize(game.getPlayers().size());
         for (Player pl : game.getPlayers()) {
             drawCards(pl, game.getDeck(), handSize);
+            ensureHandSize(pl, game.getDeck(), handSize);
         }
 
         // установить дедлайн
@@ -251,6 +252,7 @@ public class GameService {
 
         // добрать
         drawCards(player, game.getDeck(), 1);
+        ensureHandSize(player, game.getDeck(), getHandSize(game.getPlayers().size()));
         logHandSize("move", player);
 
         // победа: sequencesToWin
@@ -303,6 +305,7 @@ public class GameService {
         logHandSize("remove", current);
 
         drawCards(current, game.getDeck(), 1);
+        ensureHandSize(current, game.getDeck(), getHandSize(game.getPlayers().size()));
         setExchangeUsedThisTurn(game, true);
         logHandSize("exchange", current);
 
@@ -397,6 +400,16 @@ public class GameService {
             player.getHand().add(deck.remove(0));
         }
         logHandSize("draw", player);
+    }
+
+    private void ensureHandSize(Player player, List<Card> deck, int targetSize) {
+        if (player.getHand() == null) {
+            player.setHand(new ArrayList<>());
+        }
+        while (player.getHand().size() < targetSize && !deck.isEmpty()) {
+            player.getHand().add(deck.remove(0));
+        }
+        logHandSize("ensure", player);
     }
 
     /**
@@ -623,7 +636,7 @@ public class GameService {
                             positions.clear();
                             break;
                         }
-                        if (!ownsCellForTeam(board[nx][ny], game, player)) {
+                        if (!ownsCellForTeam(board[ny][nx], game, player)) {
                             positions.clear();
                             break;
                         }
