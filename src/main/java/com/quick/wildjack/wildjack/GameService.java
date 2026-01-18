@@ -2,6 +2,8 @@ package com.quick.wildjack.wildjack;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 
@@ -12,6 +14,7 @@ public class GameService {
 
     private static final String GAME_ID_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
     private static final int GAME_ID_LENGTH = 5;
+    private static final Logger log = LoggerFactory.getLogger(GameService.class);
     private final Map<String, Game> games = new HashMap<>();
     private final Map<String, Boolean> exchangeUsedByGame = new HashMap<>();
     private final RedisTemplate<String, Game> gameRedisTemplate;
@@ -220,6 +223,7 @@ public class GameService {
         if (twoEyed) {
             if (target.getOwner() != null) throw new RuntimeException("Cell is occupied");
             target.setOwner(player);
+            game.setLastMove(buildLastMove(player, card, x, y, false, true));
 
         } else if (oneEyed) {
             if (target.getOwner() == null) throw new RuntimeException("No chip to remove");
@@ -228,6 +232,7 @@ public class GameService {
                 throw new RuntimeException("Cannot remove chip from sequence");
             }
             target.setOwner(null);
+            game.setLastMove(buildLastMove(player, card, x, y, true, false));
 
         } else {
             // обычная карта — только на совпадающую клетку и только если свободно
@@ -236,14 +241,17 @@ public class GameService {
             }
             if (target.getOwner() != null) throw new RuntimeException("Cell is occupied");
             target.setOwner(player);
+            game.setLastMove(buildLastMove(player, card, x, y, false, false));
         }
 
         // карта должна быть в руке — удаляем по rank+suit
         boolean removed = player.getHand().removeIf(c -> sameCard(c, card));
         if (!removed) throw new RuntimeException("Card not in hand");
+        logHandSize("remove", player);
 
         // добрать
         drawCards(player, game.getDeck(), 1);
+        logHandSize("move", player);
 
         // победа: sequencesToWin
         if (checkAndUpdateVictory(game, player)) {
@@ -256,6 +264,8 @@ public class GameService {
             finalizeGame(game);
             return game;
         }
+
+        updateSequencesSnapshot(game);
 
         // следующий игрок + дедлайн
         advanceTurn(game);
@@ -290,9 +300,11 @@ public class GameService {
         if (!isCardDead(game, current, card)) throw new RuntimeException("Card is not dead");
 
         current.getHand().removeIf(c -> sameCard(c, card));
+        logHandSize("remove", current);
 
         drawCards(current, game.getDeck(), 1);
         setExchangeUsedThisTurn(game, true);
+        logHandSize("exchange", current);
 
         if (checkAndUpdateDraw(game)) {
             finalizeGame(game);
@@ -384,6 +396,7 @@ public class GameService {
         for (int i = 0; i < count && !deck.isEmpty(); i++) {
             player.getHand().add(deck.remove(0));
         }
+        logHandSize("draw", player);
     }
 
     /**
@@ -494,6 +507,7 @@ public class GameService {
     }
 
     private Map<String, Integer> updateSequencesSnapshot(Game game) {
+        markSequences(game);
         Map<String, Integer> sequencesByKey = new HashMap<>();
         for (Player player : game.getPlayers()) {
             String key = getSequenceKey(game, player);
@@ -504,6 +518,21 @@ public class GameService {
         }
         game.setSequencesByKey(sequencesByKey);
         return sequencesByKey;
+    }
+
+    private void markSequences(Game game) {
+        for (Cell[] row : game.getBoard()) {
+            for (Cell cell : row) {
+                cell.setSequence(false);
+            }
+        }
+        for (Player player : game.getPlayers()) {
+            for (Sequence sequence : findSequences(game, player)) {
+                for (Position position : sequence.positions()) {
+                    game.getBoard()[position.y()][position.x()].setSequence(true);
+                }
+            }
+        }
     }
 
     private boolean checkAndUpdateDraw(Game game) {
@@ -820,5 +849,21 @@ public class GameService {
     }
 
     private record Position(int x, int y) {
+    }
+
+    private LastMove buildLastMove(Player player, Card card, int x, int y, boolean isJackRemove, boolean isJackWild) {
+        LastMove lastMove = new LastMove();
+        lastMove.setX(x);
+        lastMove.setY(y);
+        lastMove.setPlayerId(player.getId());
+        lastMove.setCard(card);
+        lastMove.setJackRemove(isJackRemove);
+        lastMove.setJackWild(isJackWild);
+        return lastMove;
+    }
+
+    private void logHandSize(String action, Player player) {
+        int size = player.getHand() == null ? 0 : player.getHand().size();
+        log.info("hand-update action={} playerId={} handSize={}", action, player.getId(), size);
     }
 }

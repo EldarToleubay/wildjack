@@ -20,4 +20,5 @@ public class Game {
     private GameResult result;          // WIN / DRAW
     private String winnerKey;           // playerId or team key
     private Map<String, Integer> sequencesByKey;
+    private LastMove lastMove;
 }
