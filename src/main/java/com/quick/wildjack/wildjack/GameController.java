@@ -58,7 +58,14 @@ public class GameController {
             @RequestBody MoveRequest moveRequest
     ) {
         return ResponseEntity.ok(
-                gameService.makeMove(gameId, playerId, moveRequest.getCard(), moveRequest.getX(), moveRequest.getY())
+                gameService.makeMove(
+                        gameId,
+                        playerId,
+                        moveRequest.getCard(),
+                        moveRequest.getCardIndex(),
+                        moveRequest.getX(),
+                        moveRequest.getY()
+                )
         );
     }
 

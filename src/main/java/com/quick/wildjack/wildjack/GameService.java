@@ -188,7 +188,7 @@ public class GameService {
     /**
      * Игрок делает ход
      */
-    public Game makeMove(String gameId, String playerId, Card card, int x, int y) {
+    public Game makeMove(String gameId, String playerId, Card card, Integer cardIndex, int x, int y) {
         Game game = getGame(gameId);
         if (game == null) throw new RuntimeException("Game not found");
         if (game.getStatus() != GameStatus.STARTED) throw new RuntimeException("Game not started yet");
@@ -245,10 +245,7 @@ public class GameService {
             game.setLastMove(buildLastMove(player, card, x, y, false, false));
         }
 
-        // карта должна быть в руке — удаляем по rank+suit
-        boolean removed = player.getHand().removeIf(c -> sameCard(c, card));
-        if (!removed) throw new RuntimeException("Card not in hand");
-        logHandSize("remove", player);
+        removeCardFromHand(player, card, cardIndex);
 
         // добрать
         drawCards(player, game.getDeck(), 1);
@@ -410,6 +407,29 @@ public class GameService {
             player.getHand().add(deck.remove(0));
         }
         logHandSize("ensure", player);
+    }
+
+    private void removeCardFromHand(Player player, Card card, Integer cardIndex) {
+        if (player.getHand() == null || player.getHand().isEmpty()) {
+            throw new RuntimeException("Card not in hand");
+        }
+        if (cardIndex != null) {
+            if (cardIndex < 0 || cardIndex >= player.getHand().size()) {
+                throw new RuntimeException("Card index out of range");
+            }
+            Card selected = player.getHand().get(cardIndex);
+            if (!sameCard(selected, card)) {
+                throw new RuntimeException("Card index does not match card");
+            }
+            player.getHand().remove((int) cardIndex);
+            logHandSize("remove", player);
+            return;
+        }
+        boolean removed = player.getHand().removeIf(c -> sameCard(c, card));
+        if (!removed) {
+            throw new RuntimeException("Card not in hand");
+        }
+        logHandSize("remove", player);
     }
 
     /**
@@ -617,6 +637,7 @@ public class GameService {
 
     private List<Sequence> findSequences(Game game, Player player) {
         List<Sequence> allSequences = new ArrayList<>();
+        Set<SequenceKey> seen = new HashSet<>();
         Cell[][] board = game.getBoard();
         int size = board.length;
         int[][] directions = new int[][]{
@@ -643,37 +664,18 @@ public class GameService {
                         positions.add(new Position(nx, ny));
                     }
                     if (!positions.isEmpty()) {
-                        allSequences.add(new Sequence(positions));
+                        SequenceKey key = new SequenceKey(x, y, dx, dy);
+                        if (seen.add(key)) {
+                            allSequences.add(new Sequence(positions));
+                        }
                     }
                 }
             }
         }
-        return selectMaxNonOverlapping(allSequences);
+        return allSequences;
     }
 
-    private List<Sequence> selectMaxNonOverlapping(List<Sequence> sequences) {
-        return selectMaxNonOverlapping(sequences, 0, new HashSet<>());
-    }
-
-    private List<Sequence> selectMaxNonOverlapping(List<Sequence> sequences, int index, Set<Position> used) {
-        if (index >= sequences.size()) {
-            return new ArrayList<>();
-        }
-
-        List<Sequence> skip = selectMaxNonOverlapping(sequences, index + 1, used);
-
-        Sequence current = sequences.get(index);
-        if (current.positions().stream().anyMatch(used::contains)) {
-            return skip;
-        }
-
-        Set<Position> nextUsed = new HashSet<>(used);
-        nextUsed.addAll(current.positions());
-        List<Sequence> take = new ArrayList<>();
-        take.add(current);
-        take.addAll(selectMaxNonOverlapping(sequences, index + 1, nextUsed));
-
-        return take.size() >= skip.size() ? take : skip;
+    private record SequenceKey(int x, int y, int dx, int dy) {
     }
 
     private boolean ownsCellForTeam(Cell cell, Game game, Player player) {

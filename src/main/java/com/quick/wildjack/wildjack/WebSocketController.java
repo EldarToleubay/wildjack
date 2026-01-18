@@ -41,6 +41,7 @@ public class WebSocketController {
                         message.getGameId(),
                         message.getPlayerId(),
                         message.getCard(),
+                        message.getCardIndex(),
                         message.getX(),
                         message.getY()
                 );
