@@ -264,8 +264,6 @@ public class GameService {
             return game;
         }
 
-        updateSequencesSnapshot(game);
-
         // следующий игрок + дедлайн
         advanceTurn(game);
         saveActiveGame(game);
@@ -366,7 +364,7 @@ public class GameService {
         }
         int winnerIndex = (game.getCurrentPlayerIndex() + 1) % players.size();
         Player winner = players.get(winnerIndex);
-        updateSequencesSnapshot(game);
+        ensureSequencesSnapshot(game);
         game.setStatus(GameStatus.FINISHED);
         game.setResult(GameResult.WIN);
         game.setWinnerKey(getSequenceKey(game, winner));
@@ -527,8 +525,12 @@ public class GameService {
     }
 
     private boolean checkAndUpdateVictory(Game game, Player player) {
-        Map<String, Integer> sequencesByKey = updateSequencesSnapshot(game);
+        Map<String, Integer> sequencesByKey = ensureSequencesSnapshot(game);
         String key = getSequenceKey(game, player);
+        int newSequences = countNewSequences(game, player);
+        if (newSequences > 0) {
+            sequencesByKey.put(key, sequencesByKey.getOrDefault(key, 0) + newSequences);
+        }
         int count = sequencesByKey.getOrDefault(key, 0);
         if (count >= getSequencesToWin(game)) {
             game.setStatus(GameStatus.FINISHED);
@@ -539,33 +541,63 @@ public class GameService {
         return false;
     }
 
-    private Map<String, Integer> updateSequencesSnapshot(Game game) {
-        markSequences(game);
-        Map<String, Integer> sequencesByKey = new HashMap<>();
-        for (Player player : game.getPlayers()) {
-            String key = getSequenceKey(game, player);
-            if (sequencesByKey.containsKey(key)) {
-                continue;
-            }
-            sequencesByKey.put(key, findSequences(game, player).size());
+    private Map<String, Integer> ensureSequencesSnapshot(Game game) {
+        Map<String, Integer> sequencesByKey = game.getSequencesByKey();
+        if (sequencesByKey == null) {
+            sequencesByKey = new HashMap<>();
+            game.setSequencesByKey(sequencesByKey);
         }
-        game.setSequencesByKey(sequencesByKey);
+        int teamCount = getTeamCount(game);
+        for (int i = 0; i < teamCount; i++) {
+            String key = "TEAM_" + i;
+            sequencesByKey.putIfAbsent(key, 0);
+        }
         return sequencesByKey;
     }
 
-    private void markSequences(Game game) {
-        for (Cell[] row : game.getBoard()) {
-            for (Cell cell : row) {
-                cell.setSequence(false);
+    private int countNewSequences(Game game, Player player) {
+        Set<Position> existingSequencePositions = getSequencePositions(game);
+        Set<Position> usedPositions = new HashSet<>(existingSequencePositions);
+        int count = 0;
+        for (Sequence sequence : findSequences(game, player)) {
+            if (!isSequenceAllowed(sequence.positions(), existingSequencePositions, usedPositions)) {
+                continue;
+            }
+            count++;
+            for (Position position : sequence.positions()) {
+                game.getBoard()[position.y()][position.x()].setSequence(true);
+                usedPositions.add(position);
             }
         }
-        for (Player player : game.getPlayers()) {
-            for (Sequence sequence : findSequences(game, player)) {
-                for (Position position : sequence.positions()) {
-                    game.getBoard()[position.y()][position.x()].setSequence(true);
+        return count;
+    }
+
+    private boolean isSequenceAllowed(List<Position> positions,
+                                      Set<Position> existingSequencePositions,
+                                      Set<Position> usedPositions) {
+        int overlapExisting = 0;
+        int overlapNew = 0;
+        for (Position position : positions) {
+            if (existingSequencePositions.contains(position)) {
+                overlapExisting++;
+            } else if (usedPositions.contains(position)) {
+                overlapNew++;
+            }
+        }
+        return overlapExisting <= 1 && overlapNew == 0;
+    }
+
+    private Set<Position> getSequencePositions(Game game) {
+        Set<Position> positions = new HashSet<>();
+        Cell[][] board = game.getBoard();
+        for (int y = 0; y < board.length; y++) {
+            for (int x = 0; x < board[y].length; x++) {
+                if (board[y][x].isSequence()) {
+                    positions.add(new Position(x, y));
                 }
             }
         }
+        return positions;
     }
 
     private boolean checkAndUpdateDraw(Game game) {
