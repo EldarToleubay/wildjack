@@ -1,5 +1,7 @@
 package com.quick.wildjack.wildjack;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
@@ -7,21 +9,31 @@ import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.net.URLDecoder;
+import java.security.MessageDigest;
 import java.util.Arrays;
 import java.util.Map;
 import java.util.Objects;
+import java.util.TreeMap;
 import java.util.stream.Collectors;
 
 @Service
 public class TelegramAuthService {
 
+    private static final Logger log = LoggerFactory.getLogger(TelegramAuthService.class);
     private final UserProfileRepository userProfileRepository;
     private final String botToken;
+    private final long maxAuthAgeSeconds;
+    private final boolean authDebug;
 
     public TelegramAuthService(UserProfileRepository userProfileRepository,
-                               @Value("${telegram.bot-token:}") String botToken) {
+                               @Value("${telegram.bot-token:}") String botToken,
+                               @Value("${telegram.auth.max-age-seconds:3600}") long maxAuthAgeSeconds,
+                               @Value("${telegram.auth.debug:false}") boolean authDebug) {
         this.userProfileRepository = userProfileRepository;
         this.botToken = botToken;
+        this.maxAuthAgeSeconds = maxAuthAgeSeconds;
+        this.authDebug = authDebug;
     }
 
     public TelegramAuthResponse authenticate(TelegramAuthRequest request) {
@@ -89,30 +101,75 @@ public class TelegramAuthService {
     }
 
     private boolean verifyInitData(String initData) {
-        Map<String, String> params = Arrays.stream(initData.split("&"))
-                .map(part -> part.split("=", 2))
-                .filter(pair -> pair.length == 2)
-                .collect(Collectors.toMap(pair -> pair[0], pair -> pair[1]));
-
+        Map<String, String> params = parseInitData(initData);
         String hash = params.remove("hash");
         if (hash == null) {
             return false;
         }
 
-        String dataCheckString = params.entrySet().stream()
-                .sorted(Map.Entry.comparingByKey())
+        if (!isAuthDateFresh(params.get("auth_date"))) {
+            return false;
+        }
+
+        String dataCheckString = new TreeMap<>(params).entrySet().stream()
                 .map(entry -> entry.getKey() + "=" + entry.getValue())
                 .collect(Collectors.joining("\n"));
 
-        String secretKey = hmacSha256(botToken, "WebAppData");
-        String calculatedHash = hmacSha256(dataCheckString, secretKey);
-        return Objects.equals(calculatedHash, hash);
+        byte[] secretKey = sha256Bytes(botToken);
+        String calculatedHash = hmacSha256Hex(dataCheckString, secretKey);
+        boolean matches = MessageDigest.isEqual(
+                calculatedHash.getBytes(StandardCharsets.UTF_8),
+                hash.getBytes(StandardCharsets.UTF_8)
+        );
+
+        if (authDebug) {
+            log.debug(
+                    "telegram-auth keys={} data_check_prefix={} calculated_hash_prefix={}",
+                    String.join(",", new TreeMap<>(params).keySet()),
+                    dataCheckString.substring(0, Math.min(120, dataCheckString.length())),
+                    calculatedHash.substring(0, Math.min(12, calculatedHash.length()))
+            );
+        }
+
+        return matches;
     }
 
-    private String hmacSha256(String data, String key) {
+    private Map<String, String> parseInitData(String initData) {
+        return Arrays.stream(initData.split("&"))
+                .map(part -> part.split("=", 2))
+                .filter(pair -> pair.length == 2)
+                .collect(Collectors.toMap(
+                        pair -> pair[0],
+                        pair -> URLDecoder.decode(pair[1], StandardCharsets.UTF_8)
+                ));
+    }
+
+    private boolean isAuthDateFresh(String authDate) {
+        if (authDate == null || authDate.isBlank()) {
+            return false;
+        }
+        try {
+            long timestamp = Long.parseLong(authDate);
+            long now = Instant.now().getEpochSecond();
+            return now - timestamp <= maxAuthAgeSeconds;
+        } catch (NumberFormatException e) {
+            return false;
+        }
+    }
+
+    private byte[] sha256Bytes(String data) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            return digest.digest(data.getBytes(StandardCharsets.UTF_8));
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to compute SHA-256", e);
+        }
+    }
+
+    private String hmacSha256Hex(String data, byte[] key) {
         try {
             Mac mac = Mac.getInstance("HmacSHA256");
-            SecretKeySpec secretKeySpec = new SecretKeySpec(key.getBytes(StandardCharsets.UTF_8), "HmacSHA256");
+            SecretKeySpec secretKeySpec = new SecretKeySpec(key, "HmacSHA256");
             mac.init(secretKeySpec);
             byte[] hash = mac.doFinal(data.getBytes(StandardCharsets.UTF_8));
             StringBuilder hex = new StringBuilder(hash.length * 2);
