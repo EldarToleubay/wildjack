@@ -102,36 +102,11 @@ public class TelegramAuthService {
 
     private boolean verifyInitData(String initData) {
         Map<String, String> params = parseInitData(initData);
-        String hash = params.remove("hash");
-        if (hash == null) {
-            return false;
-        }
-
-        if (!isAuthDateFresh(params.get("auth_date"))) {
-            return false;
-        }
-
-        String dataCheckString = new TreeMap<>(params).entrySet().stream()
-                .map(entry -> entry.getKey() + "=" + entry.getValue())
-                .collect(Collectors.joining("\n"));
-
-        byte[] secretKey = sha256Bytes(botToken);
-        String calculatedHash = hmacSha256Hex(dataCheckString, secretKey);
-        boolean matches = MessageDigest.isEqual(
-                calculatedHash.getBytes(StandardCharsets.UTF_8),
-                hash.getBytes(StandardCharsets.UTF_8)
-        );
-
+        ValidationLogDetails details = validateInitData(params);
         if (authDebug) {
-            log.debug(
-                    "telegram-auth keys={} data_check_prefix={} calculated_hash_prefix={}",
-                    String.join(",", new TreeMap<>(params).keySet()),
-                    dataCheckString.substring(0, Math.min(120, dataCheckString.length())),
-                    calculatedHash.substring(0, Math.min(12, calculatedHash.length()))
-            );
+            logValidation(details);
         }
-
-        return matches;
+        return details.ok();
     }
 
     private Map<String, String> parseInitData(String initData) {
@@ -144,17 +119,43 @@ public class TelegramAuthService {
                 ));
     }
 
-    private boolean isAuthDateFresh(String authDate) {
-        if (authDate == null || authDate.isBlank()) {
-            return false;
-        }
-        try {
-            long timestamp = Long.parseLong(authDate);
-            long now = Instant.now().getEpochSecond();
-            return now - timestamp <= maxAuthAgeSeconds;
-        } catch (NumberFormatException e) {
-            return false;
-        }
+    public ValidationLogDetails validateInitData(Map<String, String> rawParams) {
+        Map<String, String> params = new TreeMap<>(rawParams);
+        String keysBefore = String.join(",", params.keySet());
+        String hash = params.remove("hash");
+        String keysAfter = String.join(",", params.keySet());
+        boolean hasSignature = params.containsKey("signature");
+        int signatureLength = hasSignature ? params.get("signature").length() : 0;
+
+        String dataCheckString = params.entrySet().stream()
+                .map(entry -> entry.getKey() + "=" + entry.getValue())
+                .collect(Collectors.joining("\n"));
+
+        byte[] secretKey = sha256Bytes(botToken);
+        String calculatedHash = hmacSha256Hex(dataCheckString, secretKey);
+        String incomingHashPrefix = hash == null ? "" : hash.substring(0, Math.min(10, hash.length()));
+        String calculatedHashPrefix = calculatedHash.substring(0, Math.min(10, calculatedHash.length()));
+        boolean matches = hash != null && MessageDigest.isEqual(
+                calculatedHash.getBytes(StandardCharsets.UTF_8),
+                hash.getBytes(StandardCharsets.UTF_8)
+        );
+
+        AuthDateDetails authDateDetails = getAuthDateDetails(params.get("auth_date"));
+        boolean ok = matches && authDateDetails.fresh;
+
+        return new ValidationLogDetails(
+                keysBefore,
+                keysAfter,
+                hasSignature,
+                signatureLength,
+                incomingHashPrefix,
+                calculatedHashPrefix,
+                matches,
+                dataCheckString,
+                secretKey,
+                authDateDetails,
+                ok
+        );
     }
 
     private byte[] sha256Bytes(String data) {
@@ -179,6 +180,105 @@ public class TelegramAuthService {
             return hex.toString();
         } catch (Exception e) {
             throw new RuntimeException("Failed to compute Telegram hash", e);
+        }
+    }
+
+    private AuthDateDetails getAuthDateDetails(String authDate) {
+        long now = Instant.now().getEpochSecond();
+        if (authDate == null || authDate.isBlank()) {
+            return new AuthDateDetails(0L, now, now, maxAuthAgeSeconds, false);
+        }
+        try {
+            long timestamp = Long.parseLong(authDate);
+            long skew = now - timestamp;
+            boolean fresh = skew <= maxAuthAgeSeconds;
+            return new AuthDateDetails(timestamp, now, skew, maxAuthAgeSeconds, fresh);
+        } catch (NumberFormatException e) {
+            return new AuthDateDetails(0L, now, now, maxAuthAgeSeconds, false);
+        }
+    }
+
+    private void logValidation(ValidationLogDetails details) {
+        log.debug("telegram-auth keys_before=[{}] keys_after=[{}] signature_present={} signature_length={}",
+                details.keysBefore(), details.keysAfter(), details.hasSignature(), details.signatureLength());
+        log.debug("telegram-auth incoming_hash_prefix={} calculated_hash_prefix={} equal={}",
+                details.incomingHashPrefix(), details.calculatedHashPrefix(), details.hashEqual());
+        log.debug("telegram-auth data_check_string_length={} data_check_string_preview={}",
+                details.dataCheckString().length(), escapePreview(details.dataCheckString(), 180));
+        log.debug("telegram-auth data_first_lines={} data_last_lines={}",
+                details.firstLines(), details.lastLines());
+        log.debug("telegram-auth bot_token_mask={} secret_key_hex_prefix={}",
+                maskToken(botToken), bytesToHexPrefix(details.secretKey(), 8));
+        log.debug("telegram-auth auth_date={} now_epoch_seconds={} skew_seconds={} maxAgeSeconds={}",
+                details.authDateDetails().authDate(),
+                details.authDateDetails().nowEpochSeconds(),
+                details.authDateDetails().skewSeconds(),
+                details.authDateDetails().maxAgeSeconds());
+    }
+
+    private String escapePreview(String value, int maxLen) {
+        String trimmed = value.substring(0, Math.min(maxLen, value.length()));
+        return trimmed.replace("\n", "\\n");
+    }
+
+    private String bytesToHexPrefix(byte[] bytes, int length) {
+        StringBuilder hex = new StringBuilder(bytes.length * 2);
+        for (byte b : bytes) {
+            hex.append(String.format("%02x", b));
+        }
+        int end = Math.min(length * 2, hex.length());
+        return hex.substring(0, end);
+    }
+
+    private String maskToken(String token) {
+        if (token == null) {
+            return "";
+        }
+        if (token.length() <= 10) {
+            return token.charAt(0) + "***" + token.charAt(token.length() - 1);
+        }
+        return token.substring(0, 5) + "***" + token.substring(token.length() - 5);
+    }
+
+    private record AuthDateDetails(long authDate, long nowEpochSeconds, long skewSeconds, long maxAgeSeconds,
+                                   boolean fresh) {
+    }
+
+    private record ValidationLogDetails(
+            String keysBefore,
+            String keysAfter,
+            boolean hasSignature,
+            int signatureLength,
+            String incomingHashPrefix,
+            String calculatedHashPrefix,
+            boolean hashEqual,
+            String dataCheckString,
+            byte[] secretKey,
+            AuthDateDetails authDateDetails,
+            boolean ok
+    ) {
+        private String[] splitLines() {
+            return dataCheckString.split("\n");
+        }
+
+        private String trimLine(String line) {
+            return line.length() <= 120 ? line : line.substring(0, 120);
+        }
+
+        String firstLines() {
+            String[] lines = splitLines();
+            int count = Math.min(3, lines.length);
+            return Arrays.stream(lines, 0, count)
+                    .map(this::trimLine)
+                    .collect(Collectors.joining(","));
+        }
+
+        String lastLines() {
+            String[] lines = splitLines();
+            int count = Math.min(3, lines.length);
+            return Arrays.stream(lines, Math.max(0, lines.length - count), lines.length)
+                    .map(this::trimLine)
+                    .collect(Collectors.joining(","));
         }
     }
 }
