@@ -1,5 +1,6 @@
 package com.quick.wildjack.wildjack;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -7,10 +8,10 @@ import org.springframework.stereotype.Service;
 
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
-import java.nio.charset.StandardCharsets;
-import java.time.Instant;
 import java.net.URLDecoder;
+import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.time.Instant;
 import java.util.Arrays;
 import java.util.Map;
 import java.util.Objects;
@@ -22,17 +23,23 @@ public class TelegramAuthService {
 
     private static final Logger log = LoggerFactory.getLogger(TelegramAuthService.class);
     private final UserProfileRepository userProfileRepository;
+    private final ObjectMapper objectMapper;
     private final String botToken;
     private final long maxAuthAgeSeconds;
+    private final long maxFutureSkewSeconds;
     private final boolean authDebug;
 
     public TelegramAuthService(UserProfileRepository userProfileRepository,
+                               ObjectMapper objectMapper,
                                @Value("${telegram.bot-token:}") String botToken,
                                @Value("${telegram.auth.max-age-seconds:3600}") long maxAuthAgeSeconds,
+                               @Value("${telegram.auth.max-future-skew-seconds:300}") long maxFutureSkewSeconds,
                                @Value("${telegram.auth.debug:false}") boolean authDebug) {
         this.userProfileRepository = userProfileRepository;
+        this.objectMapper = objectMapper;
         this.botToken = botToken;
         this.maxAuthAgeSeconds = maxAuthAgeSeconds;
+        this.maxFutureSkewSeconds = maxFutureSkewSeconds;
         this.authDebug = authDebug;
     }
 
@@ -40,34 +47,29 @@ public class TelegramAuthService {
         if (request == null || request.getInitData() == null || request.getInitData().isBlank()) {
             throw new RuntimeException("initData is required");
         }
-        if (request.getUser() == null || request.getUser().getId() == null) {
-            throw new RuntimeException("user.id is required");
-        }
         if (botToken == null || botToken.isBlank()) {
             throw new RuntimeException("Telegram bot token is not configured");
         }
 
-        if (!verifyInitData(request.getInitData())) {
-            throw new RuntimeException("Invalid initData signature");
-        }
+        TelegramParsedInitData parsed = parseAndValidate(request.getInitData());
 
-        TelegramUser tgUser = request.getUser();
         Instant now = Instant.now();
-        UserProfile profile = userProfileRepository.findById(tgUser.getId())
+        UserProfile profile = userProfileRepository.findById(parsed.telegramId())
                 .orElseGet(UserProfile::new);
 
         if (profile.getCreatedAt() == null) {
             profile.setCreatedAt(now);
         }
-        profile.setTelegramId(tgUser.getId());
-        profile.setUsername(tgUser.getUsername());
-        profile.setFirstName(tgUser.getFirstName());
-        profile.setLastName(tgUser.getLastName());
-        if (request.getDisplayName() != null && !request.getDisplayName().isBlank()) {
-            profile.setDisplayName(request.getDisplayName());
+        profile.setTelegramId(parsed.telegramId());
+        profile.setUsername(parsed.username());
+        profile.setFirstName(parsed.firstName());
+        profile.setLastName(parsed.lastName());
+        profile.setLanguageCode(parsed.languageCode());
+        if (parsed.photoUrl() != null && !parsed.photoUrl().isBlank()) {
+            profile.setAvatarUrl(parsed.photoUrl());
         }
-        if (tgUser.getPhotoUrl() != null && !tgUser.getPhotoUrl().isBlank()) {
-            profile.setAvatarUrl(tgUser.getPhotoUrl());
+        if (profile.getDisplayName() == null || profile.getDisplayName().isBlank()) {
+            profile.setDisplayName(defaultDisplayName(parsed));
         }
         profile.setUpdatedAt(now);
         profile.setLastLoginAt(now);
@@ -101,8 +103,7 @@ public class TelegramAuthService {
     }
 
     private boolean verifyInitData(String initData) {
-        Map<String, String> params = parseInitData(initData);
-        ValidationLogDetails details = validateInitData(params);
+        ValidationLogDetails details = validateInitData(parseInitData(initData));
         if (authDebug) {
             logValidation(details);
         }
@@ -131,7 +132,7 @@ public class TelegramAuthService {
                 .map(entry -> entry.getKey() + "=" + entry.getValue())
                 .collect(Collectors.joining("\n"));
 
-        byte[] secretKey = sha256Bytes(botToken);
+        byte[] secretKey = deriveWebAppSecretKey(botToken);
         String calculatedHash = hmacSha256Hex(dataCheckString, secretKey);
         String incomingHashPrefix = hash == null ? "" : hash.substring(0, Math.min(10, hash.length()));
         String calculatedHashPrefix = calculatedHash.substring(0, Math.min(10, calculatedHash.length()));
@@ -167,6 +168,17 @@ public class TelegramAuthService {
         }
     }
 
+    private byte[] deriveWebAppSecretKey(String token) {
+        try {
+            Mac mac = Mac.getInstance("HmacSHA256");
+            SecretKeySpec keySpec = new SecretKeySpec("WebAppData".getBytes(StandardCharsets.UTF_8), "HmacSHA256");
+            mac.init(keySpec);
+            return mac.doFinal(token.getBytes(StandardCharsets.UTF_8));
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to derive WebApp secret key", e);
+        }
+    }
+
     private String hmacSha256Hex(String data, byte[] key) {
         try {
             Mac mac = Mac.getInstance("HmacSHA256");
@@ -191,7 +203,7 @@ public class TelegramAuthService {
         try {
             long timestamp = Long.parseLong(authDate);
             long skew = now - timestamp;
-            boolean fresh = skew <= maxAuthAgeSeconds;
+            boolean fresh = skew <= maxAuthAgeSeconds && skew >= -maxFutureSkewSeconds;
             return new AuthDateDetails(timestamp, now, skew, maxAuthAgeSeconds, fresh);
         } catch (NumberFormatException e) {
             return new AuthDateDetails(0L, now, now, maxAuthAgeSeconds, false);
@@ -280,5 +292,64 @@ public class TelegramAuthService {
                     .map(this::trimLine)
                     .collect(Collectors.joining(","));
         }
+    }
+
+    private TelegramParsedInitData parseAndValidate(String initData) {
+        Map<String, String> params = parseInitData(initData);
+        ValidationLogDetails details = validateInitData(params);
+        if (authDebug) {
+            logValidation(details);
+        }
+        if (!details.ok()) {
+            throw new RuntimeException("Invalid initData signature");
+        }
+
+        TelegramParsedInitData parsed = parseTelegramUser(params);
+        if (parsed.telegramId() == null) {
+            throw new RuntimeException("Telegram user id missing");
+        }
+        return parsed;
+    }
+
+    private TelegramParsedInitData parseTelegramUser(Map<String, String> params) {
+        String userJson = params.get("user");
+        if (userJson == null || userJson.isBlank()) {
+            return new TelegramParsedInitData(null, null, null, null, null, null, null);
+        }
+        try {
+            TelegramUser user = objectMapper.readValue(userJson, TelegramUser.class);
+            return new TelegramParsedInitData(
+                    user.getId(),
+                    user.getUsername(),
+                    user.getFirstName(),
+                    user.getLastName(),
+                    user.getPhotoUrl(),
+                    user.getLanguageCode(),
+                    params.get("auth_date")
+            );
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to parse Telegram user", e);
+        }
+    }
+
+    private String defaultDisplayName(TelegramParsedInitData parsed) {
+        if (parsed.username() != null && !parsed.username().isBlank()) {
+            return "@" + parsed.username();
+        }
+        String fullName = String.join(" ",
+                parsed.firstName() == null ? "" : parsed.firstName(),
+                parsed.lastName() == null ? "" : parsed.lastName()
+        ).trim();
+        if (!fullName.isBlank()) {
+            return fullName;
+        }
+        if (parsed.firstName() != null && !parsed.firstName().isBlank()) {
+            return parsed.firstName();
+        }
+        return "Player";
+    }
+
+    private record TelegramParsedInitData(Long telegramId, String username, String firstName, String lastName,
+                                          String photoUrl, String languageCode, String authDate) {
     }
 }

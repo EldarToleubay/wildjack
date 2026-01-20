@@ -12,6 +12,7 @@ public class UserProfileResponse {
     private String firstName;
     private String lastName;
     private String avatarUrl;
+    private String languageCode;
     private String startParam;
     private Instant createdAt;
     private Instant updatedAt;
@@ -25,6 +26,7 @@ public class UserProfileResponse {
         response.setFirstName(profile.getFirstName());
         response.setLastName(profile.getLastName());
         response.setAvatarUrl(profile.getAvatarUrl());
+        response.setLanguageCode(profile.getLanguageCode());
         response.setStartParam(profile.getStartParam());
         response.setCreatedAt(profile.getCreatedAt());
         response.setUpdatedAt(profile.getUpdatedAt());

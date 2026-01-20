@@ -49,7 +49,8 @@ public class TelegramInitDataVerifier {
         try {
             long timestamp = Long.parseLong(authDate);
             long now = Instant.now().getEpochSecond();
-            if (now - timestamp > maxAgeSeconds) {
+            long skew = now - timestamp;
+            if (skew > maxAgeSeconds || skew < -300) {
                 return false;
             }
         } catch (NumberFormatException e) {
@@ -60,7 +61,7 @@ public class TelegramInitDataVerifier {
                 .map(entry -> entry.getKey() + "=" + entry.getValue())
                 .collect(Collectors.joining("\n"));
 
-        byte[] secretKey = sha256Bytes(botToken);
+        byte[] secretKey = deriveWebAppSecretKey(botToken);
         String calculatedHash = hmacSha256Hex(dataCheckString, secretKey);
 
         return MessageDigest.isEqual(
@@ -69,12 +70,14 @@ public class TelegramInitDataVerifier {
         );
     }
 
-    private static byte[] sha256Bytes(String data) {
+    private static byte[] deriveWebAppSecretKey(String token) {
         try {
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            return digest.digest(data.getBytes(StandardCharsets.UTF_8));
+            Mac mac = Mac.getInstance("HmacSHA256");
+            SecretKeySpec keySpec = new SecretKeySpec("WebAppData".getBytes(StandardCharsets.UTF_8), "HmacSHA256");
+            mac.init(keySpec);
+            return mac.doFinal(token.getBytes(StandardCharsets.UTF_8));
         } catch (Exception e) {
-            throw new RuntimeException("Failed to compute SHA-256", e);
+            throw new RuntimeException("Failed to derive WebApp secret key", e);
         }
     }
 
