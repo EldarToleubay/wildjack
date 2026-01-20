@@ -9,4 +9,5 @@ public class TelegramUser {
     private String firstName;
     private String lastName;
     private String photoUrl;
+    private String languageCode;
 }

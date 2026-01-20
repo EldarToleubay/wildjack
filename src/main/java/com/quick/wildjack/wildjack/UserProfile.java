@@ -30,6 +30,9 @@ public class UserProfile {
     @Column(name = "avatar_url")
     private String avatarUrl;
 
+    @Column(name = "language_code")
+    private String languageCode;
+
     @Column(name = "start_param")
     private String startParam;
 
