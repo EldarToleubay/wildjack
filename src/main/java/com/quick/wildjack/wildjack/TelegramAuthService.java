@@ -102,6 +102,18 @@ public class TelegramAuthService {
         return UserProfileResponse.from(saved);
     }
 
+    public java.util.List<UserProfileResponse> getLeaderboard(int limit) {
+        return userProfileRepository.findAll().stream()
+                .sorted(java.util.Comparator.comparingInt(this::ratingSafe).reversed())
+                .limit(Math.max(1, limit))
+                .map(UserProfileResponse::from)
+                .toList();
+    }
+
+    private int ratingSafe(UserProfile profile) {
+        return profile.getRating() == null ? 0 : profile.getRating();
+    }
+
     private boolean verifyInitData(String initData) {
         ValidationLogDetails details = validateInitData(parseInitData(initData));
         if (authDebug) {

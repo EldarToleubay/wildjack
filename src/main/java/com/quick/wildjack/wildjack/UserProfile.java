@@ -44,4 +44,16 @@ public class UserProfile {
 
     @Column(name = "last_login_at")
     private Instant lastLoginAt;
+
+    @Column(name = "rating")
+    private Integer rating;
+
+    @Column(name = "games_played")
+    private Integer gamesPlayed;
+
+    @Column(name = "wins")
+    private Integer wins;
+
+    @Column(name = "losses")
+    private Integer losses;
 }

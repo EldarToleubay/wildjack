@@ -17,6 +17,10 @@ public class UserProfileResponse {
     private Instant createdAt;
     private Instant updatedAt;
     private Instant lastLoginAt;
+    private Integer rating;
+    private Integer gamesPlayed;
+    private Integer wins;
+    private Integer losses;
 
     public static UserProfileResponse from(UserProfile profile) {
         UserProfileResponse response = new UserProfileResponse();
@@ -31,6 +35,10 @@ public class UserProfileResponse {
         response.setCreatedAt(profile.getCreatedAt());
         response.setUpdatedAt(profile.getUpdatedAt());
         response.setLastLoginAt(profile.getLastLoginAt());
+        response.setRating(profile.getRating());
+        response.setGamesPlayed(profile.getGamesPlayed());
+        response.setWins(profile.getWins());
+        response.setLosses(profile.getLosses());
         return response;
     }
 }

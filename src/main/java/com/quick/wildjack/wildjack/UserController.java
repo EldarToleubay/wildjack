@@ -6,9 +6,14 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+
+import java.util.Comparator;
+import java.util.List;
+import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/users")
@@ -29,5 +34,16 @@ public class UserController {
             @RequestBody UserProfileUpdateRequest request
     ) {
         return ResponseEntity.ok(telegramAuthService.updateProfile(telegramId, request));
+    }
+
+    @GetMapping("/me/stats")
+    public ResponseEntity<UserProfileResponse> getMyStats(@RequestHeader("X-Telegram-Id") Long telegramId) {
+        return ResponseEntity.ok(telegramAuthService.getProfile(telegramId));
+    }
+
+    @GetMapping("/leaderboard")
+    public ResponseEntity<List<UserProfileResponse>> leaderboard(@RequestParam(defaultValue = "50") int limit) {
+        List<UserProfileResponse> list = telegramAuthService.getLeaderboard(limit);
+        return ResponseEntity.ok(list);
     }
 }
