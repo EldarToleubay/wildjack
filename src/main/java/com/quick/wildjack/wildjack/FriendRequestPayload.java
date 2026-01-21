@@ -4,5 +4,5 @@ import lombok.Data;
 
 @Data
 public class FriendRequestPayload {
-    private Long toTelegramId;
+    private String displayName;
 }

@@ -26,7 +26,7 @@ public class FriendController {
             @RequestHeader("X-Telegram-Id") Long telegramId,
             @RequestBody FriendRequestPayload payload
     ) {
-        return ResponseEntity.ok(friendService.sendRequest(telegramId, payload.getToTelegramId()));
+        return ResponseEntity.ok(friendService.sendRequest(telegramId, payload.getDisplayName()));
     }
 
     @PostMapping("/accept")

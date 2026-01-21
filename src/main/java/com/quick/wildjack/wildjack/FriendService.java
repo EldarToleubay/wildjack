@@ -21,12 +21,14 @@ public class FriendService {
         this.userProfileRepository = userProfileRepository;
     }
 
-    public FriendRequest sendRequest(Long fromId, Long toId) {
+    public FriendRequest sendRequest(Long fromId, String displayName) {
+        UserProfile targetProfile = userProfileRepository.findByDisplayNameIgnoreCase(displayName)
+                .orElseThrow(() -> new RuntimeException("User not found"));
+        Long toId = targetProfile.getTelegramId();
         if (fromId.equals(toId)) {
             throw new RuntimeException("Cannot friend yourself");
         }
         ensureUserExists(fromId);
-        ensureUserExists(toId);
 
         Optional<Friendship> existingFriendship = friendshipRepository
                 .findByUserTelegramIdAndFriendTelegramId(fromId, toId);
@@ -60,6 +62,7 @@ public class FriendService {
 
         createFriendship(request.getFromTelegramId(), request.getToTelegramId());
         createFriendship(request.getToTelegramId(), request.getFromTelegramId());
+        friendRequestRepository.delete(request);
         return request;
     }
 
@@ -71,7 +74,9 @@ public class FriendService {
         }
         request.setStatus(FriendRequestStatus.REJECTED);
         request.setRespondedAt(Instant.now());
-        return friendRequestRepository.save(request);
+        friendRequestRepository.save(request);
+        friendRequestRepository.delete(request);
+        return request;
     }
 
     public List<Friendship> listFriends(Long userId) {
