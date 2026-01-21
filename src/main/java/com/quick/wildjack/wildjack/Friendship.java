@@ -24,6 +24,12 @@ public class Friendship {
     @Column(name = "friend_telegram_id", nullable = false)
     private Long friendTelegramId;
 
+    @Column(name = "friend_display_name")
+    private String friendDisplayName;
+
+    @Column(name = "friend_avatar_url")
+    private String friendAvatarUrl;
+
     @Column(name = "created_at")
     private Instant createdAt;
 }

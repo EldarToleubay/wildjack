@@ -23,8 +23,20 @@ public class FriendRequest {
     @Column(name = "from_telegram_id", nullable = false)
     private Long fromTelegramId;
 
+    @Column(name = "from_display_name")
+    private String fromDisplayName;
+
+    @Column(name = "from_avatar_url")
+    private String fromAvatarUrl;
+
     @Column(name = "to_telegram_id", nullable = false)
     private Long toTelegramId;
+
+    @Column(name = "to_display_name")
+    private String toDisplayName;
+
+    @Column(name = "to_avatar_url")
+    private String toAvatarUrl;
 
     @Enumerated(EnumType.STRING)
     private FriendRequestStatus status;

@@ -24,6 +24,8 @@ public class FriendService {
     public FriendRequest sendRequest(Long fromId, String displayName) {
         UserProfile targetProfile = userProfileRepository.findByDisplayNameIgnoreCase(displayName)
                 .orElseThrow(() -> new RuntimeException("User not found"));
+        UserProfile fromProfile = userProfileRepository.findById(fromId)
+                .orElseThrow(() -> new RuntimeException("User not found"));
         Long toId = targetProfile.getTelegramId();
         if (fromId.equals(toId)) {
             throw new RuntimeException("Cannot friend yourself");
@@ -44,7 +46,11 @@ public class FriendService {
 
         FriendRequest request = new FriendRequest();
         request.setFromTelegramId(fromId);
+        request.setFromDisplayName(fromProfile.getDisplayName());
+        request.setFromAvatarUrl(fromProfile.getAvatarUrl());
         request.setToTelegramId(toId);
+        request.setToDisplayName(targetProfile.getDisplayName());
+        request.setToAvatarUrl(targetProfile.getAvatarUrl());
         request.setStatus(FriendRequestStatus.PENDING);
         request.setCreatedAt(Instant.now());
         return friendRequestRepository.save(request);
@@ -94,9 +100,13 @@ public class FriendService {
     private void createFriendship(Long userId, Long friendId) {
         friendshipRepository.findByUserTelegramIdAndFriendTelegramId(userId, friendId)
                 .orElseGet(() -> {
+                    UserProfile friendProfile = userProfileRepository.findById(friendId)
+                            .orElseThrow(() -> new RuntimeException("User not found"));
                     Friendship friendship = new Friendship();
                     friendship.setUserTelegramId(userId);
                     friendship.setFriendTelegramId(friendId);
+                    friendship.setFriendDisplayName(friendProfile.getDisplayName());
+                    friendship.setFriendAvatarUrl(friendProfile.getAvatarUrl());
                     friendship.setCreatedAt(Instant.now());
                     return friendshipRepository.save(friendship);
                 });
