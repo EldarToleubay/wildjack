@@ -319,6 +319,8 @@ public class GameService {
         return game;
     }
 
+
+
     public Game exchangeDeadCard(String gameId, String playerId, Card card) {
         Game game = getGame(gameId);
         if (game == null) throw new RuntimeException("Game not found");
@@ -361,28 +363,7 @@ public class GameService {
         return game;
     }
 
-    public Game skipTurnIfStuck(String gameId, String playerId) {
-        Game game = getGame(gameId);
-        if (game == null) throw new RuntimeException("Game not found");
-        if (game.getStatus() != GameStatus.STARTED) throw new RuntimeException("Game not started yet");
 
-        if (handleTimeoutIfNeeded(game)) {
-            return game;
-        }
-
-        Player current = game.getPlayers().get(game.getCurrentPlayerIndex());
-        if (!current.getId().equals(playerId)) {
-            throw new RuntimeException("Not your turn");
-        }
-
-        if (!isCurrentPlayerStuck(game)) {
-            throw new RuntimeException("Player still has available actions");
-        }
-
-        advanceTurn(game);
-        saveActiveGame(game);
-        return game;
-    }
 
     private void skipTurn(Game game) {
         advanceTurn(game);
