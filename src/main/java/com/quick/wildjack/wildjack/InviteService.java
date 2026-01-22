@@ -28,8 +28,8 @@ public class InviteService {
         if (fromId.equals(toId)) {
             throw new RuntimeException("Cannot invite yourself");
         }
-        ensureUserExists(fromId);
-        ensureUserExists(toId);
+        UserProfile fromProfile = ensureUserExists(fromId);
+        UserProfile toProfile = ensureUserExists(toId);
         if (gameId == null || gameId.isBlank()) {
             throw new RuntimeException("Game ID is required");
         }
@@ -39,7 +39,11 @@ public class InviteService {
         invite.setGameId(gameId);
         invite.setStatus(GameInviteStatus.PENDING);
         invite.setCreatedAt(Instant.now());
-        return gameInviteRepository.save(invite);
+        GameInvite saved = gameInviteRepository.save(invite);
+        UserEventPayload payload = buildInviteEvent("game_invite_created", saved, fromProfile, fromProfile, toProfile);
+        sendUserEvent(fromId, payload);
+        sendUserEvent(toId, payload);
+        return saved;
     }
 
     public InviteAcceptResponse acceptInvite(Long inviteId, Long userId) {
@@ -52,8 +56,8 @@ public class InviteService {
         invite.setRespondedAt(Instant.now());
         gameInviteRepository.save(invite);
 
-        UserProfile profile = userProfileRepository.findById(userId)
-                .orElseThrow(() -> new RuntimeException("User not found"));
+        UserProfile profile = ensureUserExists(userId);
+        UserProfile fromProfile = ensureUserExists(invite.getFromTelegramId());
         Game game = gameService.joinGame(invite.getGameId(), profile.getDisplayName());
 
         String playerId = game.getPlayers().stream()
@@ -63,6 +67,12 @@ public class InviteService {
                 .orElse(null);
 
         messagingTemplate.convertAndSend("/topic/game/" + game.getId(), game);
+
+        UserEventPayload payload = buildInviteEvent("game_invite_accepted", invite, profile, fromProfile, profile);
+        payload.setGameId(game.getId());
+        payload.setPlayerId(playerId);
+        sendUserEvent(invite.getFromTelegramId(), payload);
+        sendUserEvent(invite.getToTelegramId(), payload);
 
         InviteAcceptResponse response = new InviteAcceptResponse();
         response.setInvite(invite);
@@ -77,9 +87,15 @@ public class InviteService {
         if (!invite.getToTelegramId().equals(userId)) {
             throw new RuntimeException("Not your invite");
         }
+        UserProfile fromProfile = ensureUserExists(invite.getFromTelegramId());
+        UserProfile toProfile = ensureUserExists(invite.getToTelegramId());
         invite.setStatus(GameInviteStatus.REJECTED);
         invite.setRespondedAt(Instant.now());
-        return gameInviteRepository.save(invite);
+        GameInvite saved = gameInviteRepository.save(invite);
+        UserEventPayload payload = buildInviteEvent("game_invite_rejected", saved, toProfile, fromProfile, toProfile);
+        sendUserEvent(invite.getFromTelegramId(), payload);
+        sendUserEvent(invite.getToTelegramId(), payload);
+        return saved;
     }
 
     public List<GameInvite> listIncoming(Long userId) {
@@ -90,8 +106,31 @@ public class InviteService {
         return gameInviteRepository.findByFromTelegramId(userId);
     }
 
-    private void ensureUserExists(Long telegramId) {
-        userProfileRepository.findById(telegramId)
+    private UserProfile ensureUserExists(Long telegramId) {
+        return userProfileRepository.findById(telegramId)
                 .orElseThrow(() -> new RuntimeException("User not found"));
+    }
+
+    private void sendUserEvent(Long telegramId, UserEventPayload payload) {
+        messagingTemplate.convertAndSend("/topic/user/" + telegramId + "/events", payload);
+    }
+
+    private UserEventPayload buildInviteEvent(String type,
+                                              GameInvite invite,
+                                              UserProfile actorProfile,
+                                              UserProfile fromProfile,
+                                              UserProfile toProfile) {
+        UserEventPayload payload = new UserEventPayload();
+        payload.setType(type);
+        payload.setInviteId(invite.getId());
+        payload.setFromTelegramId(invite.getFromTelegramId());
+        payload.setToTelegramId(invite.getToTelegramId());
+        payload.setDisplayName(actorProfile != null ? actorProfile.getDisplayName() : null);
+        payload.setAvatarUrl(actorProfile != null ? actorProfile.getAvatarUrl() : null);
+        payload.setFromDisplayName(fromProfile != null ? fromProfile.getDisplayName() : null);
+        payload.setFromAvatarUrl(fromProfile != null ? fromProfile.getAvatarUrl() : null);
+        payload.setToDisplayName(toProfile != null ? toProfile.getDisplayName() : null);
+        payload.setToAvatarUrl(toProfile != null ? toProfile.getAvatarUrl() : null);
+        return payload;
     }
 }
