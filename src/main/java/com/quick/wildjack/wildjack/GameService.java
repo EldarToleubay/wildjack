@@ -268,6 +268,47 @@ public class GameService {
         advanceTurn(game);
         saveActiveGame(game);
 
+        boolean inHand = current.getHand().stream().anyMatch(c -> sameCard(c, card));
+        if (!inHand) throw new RuntimeException("Card not in hand");
+        if (!isCardDead(game, current, card)) throw new RuntimeException("Card is not dead");
+
+        current.getHand().removeIf(c -> sameCard(c, card));
+        logHandSize("remove", current);
+
+        drawCards(current, game.getDeck(), 1);
+        ensureHandSize(current, game.getDeck(), getHandSize(game.getPlayers().size()));
+        setExchangeUsedThisTurn(game, true);
+        logHandSize("exchange", current);
+
+        if (checkAndUpdateDraw(game)) {
+            finalizeGame(game);
+            return game;
+        }
+
+        saveActiveGame(game);
+        return game;
+    }
+
+    public Game skipTurnIfStuck(String gameId, String playerId) {
+        Game game = getGame(gameId);
+        if (game == null) throw new RuntimeException("Game not found");
+        if (game.getStatus() != GameStatus.STARTED) throw new RuntimeException("Game not started yet");
+
+        if (handleTimeoutIfNeeded(game)) {
+            return game;
+        }
+
+        Player current = game.getPlayers().get(game.getCurrentPlayerIndex());
+        if (!current.getId().equals(playerId)) {
+            throw new RuntimeException("Not your turn");
+        }
+
+        if (!isCurrentPlayerStuck(game)) {
+            throw new RuntimeException("Player still has available actions");
+        }
+
+        advanceTurn(game);
+        saveActiveGame(game);
         return game;
     }
 
