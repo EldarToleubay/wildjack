@@ -3,12 +3,14 @@ package com.quick.wildjack.wildjack;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 
 @Service
 public class InviteService {
 
+    private static final Duration INVITE_TTL = Duration.ofMinutes(2);
     private final GameInviteRepository gameInviteRepository;
     private final UserProfileRepository userProfileRepository;
     private final GameService gameService;
@@ -25,6 +27,7 @@ public class InviteService {
     }
 
     public GameInvite sendInvite(Long fromId, Long toId, String gameId) {
+        purgeExpiredInvites();
         if (fromId.equals(toId)) {
             throw new RuntimeException("Cannot invite yourself");
         }
@@ -47,8 +50,13 @@ public class InviteService {
     }
 
     public InviteAcceptResponse acceptInvite(Long inviteId, Long userId) {
+        purgeExpiredInvites();
         GameInvite invite = gameInviteRepository.findById(inviteId)
                 .orElseThrow(() -> new RuntimeException("Invite not found"));
+        if (isInviteExpired(invite)) {
+            gameInviteRepository.delete(invite);
+            throw new RuntimeException("Invite expired");
+        }
         if (!invite.getToTelegramId().equals(userId)) {
             throw new RuntimeException("Not your invite");
         }
@@ -82,8 +90,13 @@ public class InviteService {
     }
 
     public GameInvite rejectInvite(Long inviteId, Long userId) {
+        purgeExpiredInvites();
         GameInvite invite = gameInviteRepository.findById(inviteId)
                 .orElseThrow(() -> new RuntimeException("Invite not found"));
+        if (isInviteExpired(invite)) {
+            gameInviteRepository.delete(invite);
+            throw new RuntimeException("Invite expired");
+        }
         if (!invite.getToTelegramId().equals(userId)) {
             throw new RuntimeException("Not your invite");
         }
@@ -99,16 +112,34 @@ public class InviteService {
     }
 
     public List<GameInvite> listIncoming(Long userId) {
+        purgeExpiredInvites();
         return gameInviteRepository.findByToTelegramId(userId);
     }
 
     public List<GameInvite> listOutgoing(Long userId) {
+        purgeExpiredInvites();
         return gameInviteRepository.findByFromTelegramId(userId);
     }
 
     private UserProfile ensureUserExists(Long telegramId) {
         return userProfileRepository.findById(telegramId)
                 .orElseThrow(() -> new RuntimeException("User not found"));
+    }
+
+    private void purgeExpiredInvites() {
+        if (gameInviteRepository == null) {
+            return;
+        }
+        Instant cutoff = Instant.now().minus(INVITE_TTL);
+        gameInviteRepository.deleteByStatusAndCreatedAtBefore(GameInviteStatus.PENDING, cutoff);
+    }
+
+    private boolean isInviteExpired(GameInvite invite) {
+        if (invite.getStatus() != GameInviteStatus.PENDING) {
+            return false;
+        }
+        Instant createdAt = invite.getCreatedAt();
+        return createdAt != null && createdAt.isBefore(Instant.now().minus(INVITE_TTL));
     }
 
     private void sendUserEvent(Long telegramId, UserEventPayload payload) {
