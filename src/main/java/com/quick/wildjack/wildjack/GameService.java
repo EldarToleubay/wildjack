@@ -229,7 +229,7 @@ public class GameService {
         } else if (oneEyed) {
             if (target.getOwner() == null) throw new RuntimeException("No chip to remove");
             if (isSameTeam(game, player, target.getOwner())) throw new RuntimeException("Cannot remove your own chip");
-            if (isLockedChip(game, target.getOwner(), y, x)) {
+            if (isLockedChip(game, y, x)) {
                 throw new RuntimeException("Cannot remove chip from sequence");
             }
             target.setOwner(null);
@@ -268,6 +268,47 @@ public class GameService {
         advanceTurn(game);
         saveActiveGame(game);
 
+        boolean inHand = current.getHand().stream().anyMatch(c -> sameCard(c, card));
+        if (!inHand) throw new RuntimeException("Card not in hand");
+        if (!isCardDead(game, current, card)) throw new RuntimeException("Card is not dead");
+
+        current.getHand().removeIf(c -> sameCard(c, card));
+        logHandSize("remove", current);
+
+        drawCards(current, game.getDeck(), 1);
+        ensureHandSize(current, game.getDeck(), getHandSize(game.getPlayers().size()));
+        setExchangeUsedThisTurn(game, true);
+        logHandSize("exchange", current);
+
+        if (checkAndUpdateDraw(game)) {
+            finalizeGame(game);
+            return game;
+        }
+
+        saveActiveGame(game);
+        return game;
+    }
+
+    public Game skipTurnIfStuck(String gameId, String playerId) {
+        Game game = getGame(gameId);
+        if (game == null) throw new RuntimeException("Game not found");
+        if (game.getStatus() != GameStatus.STARTED) throw new RuntimeException("Game not started yet");
+
+        if (handleTimeoutIfNeeded(game)) {
+            return game;
+        }
+
+        Player current = game.getPlayers().get(game.getCurrentPlayerIndex());
+        if (!current.getId().equals(playerId)) {
+            throw new RuntimeException("Not your turn");
+        }
+
+        if (!isCurrentPlayerStuck(game)) {
+            throw new RuntimeException("Player still has available actions");
+        }
+
+        advanceTurn(game);
+        saveActiveGame(game);
         return game;
     }
 
@@ -792,20 +833,22 @@ public class GameService {
         return hasFreeMatchingCell(game, card);
     }
 
-    private boolean isLockedChip(Game game, Player owner, int x, int y) {
-        List<Sequence> sequences = findSequences(game, owner);
-        Position position = new Position(x, y);
-        return sequences.stream().anyMatch(sequence -> sequence.positions().contains(position));
+    private boolean isLockedChip(Game game, int y, int x) {
+        return game.getBoard()[y][x].isSequence();
     }
 
     private Set<Position> getLockedPositionsForOpponents(Game game, Player player) {
         Set<Position> locked = new HashSet<>();
-        for (Player opponent : game.getPlayers()) {
-            if (isSameTeam(game, player, opponent)) {
-                continue;
-            }
-            for (Sequence sequence : findSequences(game, opponent)) {
-                locked.addAll(sequence.positions());
+        Cell[][] board = game.getBoard();
+        for (int y = 0; y < board.length; y++) {
+            for (int x = 0; x < board[y].length; x++) {
+                Cell cell = board[y][x];
+                if (cell.getOwner() == null || !cell.isSequence()) {
+                    continue;
+                }
+                if (!isSameTeam(game, player, cell.getOwner())) {
+                    locked.add(new Position(x, y));
+                }
             }
         }
         return locked;
