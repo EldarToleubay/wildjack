@@ -221,6 +221,13 @@ public class GameService {
         boolean twoEyed = isTwoEyedJack(card);
         boolean oneEyed = isOneEyedJack(card);
 
+        if (target.isSequence()) {
+            if (oneEyed) {
+                throw new RuntimeException("Cannot remove chip from sequence");
+            }
+            throw new RuntimeException("Cell is part of a sequence");
+        }
+
         if (twoEyed) {
             if (target.getOwner() != null) throw new RuntimeException("Cell is occupied");
             target.setOwner(player);
@@ -670,7 +677,7 @@ public class GameService {
     private boolean hasFreeCell(Game game) {
         for (Cell[] row : game.getBoard()) {
             for (Cell cell : row) {
-                if (!cell.isCorner() && cell.getOwner() == null) {
+                if (!cell.isCorner() && !cell.isSequence() && cell.getOwner() == null) {
                     return true;
                 }
             }
@@ -698,6 +705,9 @@ public class GameService {
         for (Cell[] row : game.getBoard()) {
             for (Cell cell : row) {
                 if (cell.isCorner()) {
+                    continue;
+                }
+                if (cell.isSequence()) {
                     continue;
                 }
                 if (sameCard(cell.getCard(), card) && cell.getOwner() == null) {
