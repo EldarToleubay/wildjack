@@ -60,6 +60,7 @@ public class FriendService {
         FriendRequest saved = friendRequestRepository.save(request);
         UserEventPayload payload = buildFriendRequestEvent("friend_request_created", saved,
                 fromProfile.getDisplayName(), fromProfile.getAvatarUrl());
+        sendUserEvent(fromId, payload);
         sendUserEvent(toId, payload);
         return saved;
     }

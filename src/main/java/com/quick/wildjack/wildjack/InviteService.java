@@ -41,6 +41,7 @@ public class InviteService {
         invite.setCreatedAt(Instant.now());
         GameInvite saved = gameInviteRepository.save(invite);
         UserEventPayload payload = buildInviteEvent("game_invite_created", saved, fromProfile, fromProfile, toProfile);
+        sendUserEvent(fromId, payload);
         sendUserEvent(toId, payload);
         return saved;
     }
