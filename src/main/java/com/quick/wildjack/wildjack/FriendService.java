@@ -1,5 +1,6 @@
 package com.quick.wildjack.wildjack;
 
+import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
@@ -12,13 +13,16 @@ public class FriendService {
     private final FriendRequestRepository friendRequestRepository;
     private final FriendshipRepository friendshipRepository;
     private final UserProfileRepository userProfileRepository;
+    private final SimpMessagingTemplate messagingTemplate;
 
     public FriendService(FriendRequestRepository friendRequestRepository,
                          FriendshipRepository friendshipRepository,
-                         UserProfileRepository userProfileRepository) {
+                         UserProfileRepository userProfileRepository,
+                         SimpMessagingTemplate messagingTemplate) {
         this.friendRequestRepository = friendRequestRepository;
         this.friendshipRepository = friendshipRepository;
         this.userProfileRepository = userProfileRepository;
+        this.messagingTemplate = messagingTemplate;
     }
 
     public FriendRequest sendRequest(Long fromId, String displayName) {
@@ -53,7 +57,11 @@ public class FriendService {
         request.setToAvatarUrl(targetProfile.getAvatarUrl());
         request.setStatus(FriendRequestStatus.PENDING);
         request.setCreatedAt(Instant.now());
-        return friendRequestRepository.save(request);
+        FriendRequest saved = friendRequestRepository.save(request);
+        UserEventPayload payload = buildFriendRequestEvent("friend_request_created", saved,
+                fromProfile.getDisplayName(), fromProfile.getAvatarUrl());
+        sendUserEvent(toId, payload);
+        return saved;
     }
 
     public FriendRequest acceptRequest(Long requestId, Long userId) {
@@ -69,6 +77,10 @@ public class FriendService {
         createFriendship(request.getFromTelegramId(), request.getToTelegramId());
         createFriendship(request.getToTelegramId(), request.getFromTelegramId());
         friendRequestRepository.delete(request);
+        UserEventPayload payload = buildFriendRequestEvent("friend_request_accepted", request,
+                request.getToDisplayName(), request.getToAvatarUrl());
+        sendUserEvent(request.getFromTelegramId(), payload);
+        sendUserEvent(request.getToTelegramId(), payload);
         return request;
     }
 
@@ -82,6 +94,10 @@ public class FriendService {
         request.setRespondedAt(Instant.now());
         friendRequestRepository.save(request);
         friendRequestRepository.delete(request);
+        UserEventPayload payload = buildFriendRequestEvent("friend_request_rejected", request,
+                request.getToDisplayName(), request.getToAvatarUrl());
+        sendUserEvent(request.getFromTelegramId(), payload);
+        sendUserEvent(request.getToTelegramId(), payload);
         return request;
     }
 
@@ -115,5 +131,24 @@ public class FriendService {
     private void ensureUserExists(Long telegramId) {
         userProfileRepository.findById(telegramId)
                 .orElseThrow(() -> new RuntimeException("User not found"));
+    }
+
+    private void sendUserEvent(Long telegramId, UserEventPayload payload) {
+        messagingTemplate.convertAndSend("/topic/user/" + telegramId + "/events", payload);
+    }
+
+    private UserEventPayload buildFriendRequestEvent(String type, FriendRequest request, String actorName, String actorAvatar) {
+        UserEventPayload payload = new UserEventPayload();
+        payload.setType(type);
+        payload.setRequestId(request.getId());
+        payload.setFromTelegramId(request.getFromTelegramId());
+        payload.setToTelegramId(request.getToTelegramId());
+        payload.setDisplayName(actorName);
+        payload.setAvatarUrl(actorAvatar);
+        payload.setFromDisplayName(request.getFromDisplayName());
+        payload.setFromAvatarUrl(request.getFromAvatarUrl());
+        payload.setToDisplayName(request.getToDisplayName());
+        payload.setToAvatarUrl(request.getToAvatarUrl());
+        return payload;
     }
 }
