@@ -274,25 +274,6 @@ public class GameService {
         // следующий игрок + дедлайн
         advanceTurn(game);
         saveActiveGame(game);
-
-        boolean inHand = current.getHand().stream().anyMatch(c -> sameCard(c, card));
-        if (!inHand) throw new RuntimeException("Card not in hand");
-        if (!isCardDead(game, current, card)) throw new RuntimeException("Card is not dead");
-
-        current.getHand().removeIf(c -> sameCard(c, card));
-        logHandSize("remove", current);
-
-        drawCards(current, game.getDeck(), 1);
-        ensureHandSize(current, game.getDeck(), getHandSize(game.getPlayers().size()));
-        setExchangeUsedThisTurn(game, true);
-        logHandSize("exchange", current);
-
-        if (checkAndUpdateDraw(game)) {
-            finalizeGame(game);
-            return game;
-        }
-
-        saveActiveGame(game);
         return game;
     }
 
