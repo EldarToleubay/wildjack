@@ -19,13 +19,16 @@ public class GameService {
     private final Map<String, Boolean> exchangeUsedByGame = new HashMap<>();
     private final RedisTemplate<String, Game> gameRedisTemplate;
     private final FinishedGameRepository finishedGameRepository;
+    private final UserProfileRepository userProfileRepository;
     private final ObjectMapper objectMapper;
 
     public GameService(RedisTemplate<String, Game> gameRedisTemplate,
                        FinishedGameRepository finishedGameRepository,
+                       UserProfileRepository userProfileRepository,
                        ObjectMapper objectMapper) {
         this.gameRedisTemplate = gameRedisTemplate;
         this.finishedGameRepository = finishedGameRepository;
+        this.userProfileRepository = userProfileRepository;
         this.objectMapper = objectMapper;
     }
 
@@ -274,25 +277,6 @@ public class GameService {
         // следующий игрок + дедлайн
         advanceTurn(game);
         saveActiveGame(game);
-
-        boolean inHand = current.getHand().stream().anyMatch(c -> sameCard(c, card));
-        if (!inHand) throw new RuntimeException("Card not in hand");
-        if (!isCardDead(game, current, card)) throw new RuntimeException("Card is not dead");
-
-        current.getHand().removeIf(c -> sameCard(c, card));
-        logHandSize("remove", current);
-
-        drawCards(current, game.getDeck(), 1);
-        ensureHandSize(current, game.getDeck(), getHandSize(game.getPlayers().size()));
-        setExchangeUsedThisTurn(game, true);
-        logHandSize("exchange", current);
-
-        if (checkAndUpdateDraw(game)) {
-            finalizeGame(game);
-            return game;
-        }
-
-        saveActiveGame(game);
         return game;
     }
 
@@ -526,12 +510,60 @@ public class GameService {
     }
 
     private void finalizeGame(Game game) {
+        updatePlayerStats(game);
         saveFinishedGame(game);
         games.remove(game.getId());
         exchangeUsedByGame.remove(game.getId());
         if (gameRedisTemplate != null) {
             gameRedisTemplate.delete(redisKey(game.getId()));
         }
+    }
+
+    private void updatePlayerStats(Game game) {
+        if (userProfileRepository == null) {
+            return;
+        }
+        if (game.getPlayers() == null || game.getPlayers().isEmpty()) {
+            return;
+        }
+        if (game.getResult() == null) {
+            return;
+        }
+
+        String winnerKey = game.getWinnerKey();
+        java.time.Instant now = java.time.Instant.now();
+        for (Player player : game.getPlayers()) {
+            if (player.getName() == null || player.getName().isBlank()) {
+                continue;
+            }
+            Optional<UserProfile> profileOptional = userProfileRepository.findByDisplayNameIgnoreCase(player.getName());
+            if (profileOptional.isEmpty()) {
+                continue;
+            }
+            UserProfile profile = profileOptional.get();
+            int gamesPlayed = safeInt(profile.getGamesPlayed()) + 1;
+            profile.setGamesPlayed(gamesPlayed);
+
+            if (game.getResult() == GameResult.WIN && winnerKey != null) {
+                boolean isWinner = winnerKey.equals(getSequenceKey(game, player));
+                if (isWinner) {
+                    profile.setWins(safeInt(profile.getWins()) + 1);
+                    profile.setRating(Math.max(0, safeInt(profile.getRating()) + 10));
+                } else {
+                    profile.setLosses(safeInt(profile.getLosses()) + 1);
+                    profile.setRating(Math.max(0, safeInt(profile.getRating()) - 10));
+                }
+            } else if (game.getResult() == GameResult.DRAW) {
+                profile.setRating(Math.max(0, safeInt(profile.getRating())));
+            }
+
+            profile.setUpdatedAt(now);
+            userProfileRepository.save(profile);
+        }
+    }
+
+    private int safeInt(Integer value) {
+        return value == null ? 0 : value;
     }
 
     private void saveFinishedGame(Game game) {
