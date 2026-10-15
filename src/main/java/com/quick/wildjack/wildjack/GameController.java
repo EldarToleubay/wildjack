@@ -18,8 +18,9 @@ public class GameController {
 
 
     @PostMapping("/create")
-    public ResponseEntity<Game> createGame(@RequestBody List<String> playerNames) {
-        Game game = gameService.createGame(playerNames);
+    public ResponseEntity<Game> createGame(@RequestBody List<String> playerNames,
+                                           @RequestParam(required = false) Integer maxPlayers) {
+        Game game = gameService.createGame(playerNames, maxPlayers);
 
         // ✅ сразу отправим состояние в топик, чтобы создатель мог подписаться и получать апдейты
         messagingTemplate.convertAndSend("/topic/game/" + game.getId(), game);

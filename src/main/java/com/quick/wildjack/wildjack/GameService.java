@@ -41,6 +41,14 @@ public class GameService {
     private static final List<Card> BOARD_TEMPLATE = buildBoardTemplate();
 
     public Game createGame(List<String> playerNames) {
+        return createGame(playerNames, null);
+    }
+
+    /**
+     * @param maxPlayers seats at the table: 2 (1v1) or 4 (2v2, partners sit opposite each other).
+     *                   null keeps the old behaviour (seats = number of names, min 2).
+     */
+    public Game createGame(List<String> playerNames, Integer maxPlayers) {
         if (playerNames == null || playerNames.isEmpty()) {
             throw new RuntimeException("At least 1 player required");
         }
@@ -51,7 +59,17 @@ public class GameService {
         Game game = new Game();
         game.setId(generateGameId());
         game.setStatus(GameStatus.WAITING);
-        game.setMaxPlayers(Math.max(2, playerNames.size()));
+        int seats = Math.max(2, playerNames.size());
+        if (maxPlayers != null) {
+            if (maxPlayers != 2 && maxPlayers != 4) {
+                throw new RuntimeException("Players must be 2 or 4");
+            }
+            if (playerNames.size() > maxPlayers) {
+                throw new RuntimeException("Too many players");
+            }
+            seats = maxPlayers;
+        }
+        game.setMaxPlayers(seats);
         game.setTeamGame(true);
         game.setResult(null);
         game.setWinnerKey(null);
@@ -60,7 +78,7 @@ public class GameService {
 
         // игроки (пока без карт — раздадим при startGame)
         String[] colors = {"RED", "BLUE", "GREEN"};
-        int teamCount = getTeamCount(playerNames.size());
+        int teamCount = getTeamCount(seats);
         List<Player> players = new ArrayList<>();
         for (int i = 0; i < playerNames.size(); i++) {
             Player p = new Player();
@@ -138,7 +156,7 @@ public class GameService {
 
         // цвет по команде
         String[] colors = {"RED", "BLUE", "GREEN"};
-        int teamIndex = game.getPlayers().size() % getTeamCount(game.getPlayers().size());
+        int teamIndex = game.getPlayers().size() % getTeamCount(game.getMaxPlayers());
         p.setColor(colors[teamIndex % colors.length]);
 
         game.getPlayers().add(p);
